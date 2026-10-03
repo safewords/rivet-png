@@ -1,6 +1,6 @@
 # rivet-png
 
-[![CI](https://github.com/rivet-transcoder/rivet-png/actions/workflows/ci.yml/badge.svg)](https://github.com/rivet-transcoder/rivet-png/actions/workflows/ci.yml)
+[![CI](https://github.com/safewords/rivet-png/actions/workflows/ci.yml/badge.svg)](https://github.com/safewords/rivet-png/actions/workflows/ci.yml)
 
 A **PNG and APNG** decoder and encoder in Rust, with **its own DEFLATE and
 zlib** (inflate and deflate): no C, no system libraries, no build script,
@@ -11,7 +11,7 @@ decoder reads all 162 valid images of PngSuite and rejects all 14 corrupt
 ones, and decodes them to exactly the pixels the suite's construction calls
 for (the figures are [below](#how-it-is-checked)).
 
-Written for the **[rivet](https://github.com/rivet-transcoder/rivet)**
+Written for the **[rivet](https://github.com/safewords/rivet)**
 transcoder's still-image path, where it takes the place of the third-party
 `image` / `png` crates for PNG in and PNG out. Its DEFLATE codec is a public
 module, [`rpng::deflate`](src/deflate/mod.rs), for rivet's other formats
@@ -24,7 +24,7 @@ dependency (`thiserror`), no features, no build script, no `unsafe`.
 
 ```toml
 [dependencies]
-rpng = { package = "rivet-png", git = "https://github.com/rivet-transcoder/rivet-png", branch = "develop" }
+rpng = { package = "rivet-png", git = "https://github.com/safewords/rivet-png", branch = "develop" }
 ```
 
 ## What it decodes
