@@ -1,0 +1,38 @@
+rivet-png — a PNG and APNG decoder and encoder, with DEFLATE and zlib
+Copyright 2026 Ely Erin Fox
+
+This product is licensed under the Open Encoding Attribution License,
+Version 1.0 (see LICENSE.md). It is source-available, not open source: the
+attribution duty in §5 applies to commercial use; §4 requires this NOTICE to
+be carried forward with any distribution.
+
+------------------------------------------------------------------------------
+Provenance
+------------------------------------------------------------------------------
+
+The PNG and APNG decoder and encoder are original implementations written
+from the W3C Portable Network Graphics (PNG) Specification, Third Edition
+(which incorporates APNG, cICP, mDCV, cLLI and eXIf). The DEFLATE and zlib
+codec is an original implementation written from RFC 1951 (DEFLATE
+Compressed Data Format Specification version 1.3) and RFC 1950 (ZLIB
+Compressed Data Format Specification version 3.3). They are not translations
+of, and do not derive from, any other implementation's source: no code of
+libpng, zlib, zlib-ng, miniz, libdeflate, stb_image, lodepng, or of the
+png, flate2, miniz_oxide or fdeflate crates was read or consulted. The fixed
+tables (DEFLATE's length and distance bases and extra bits, the code length
+order, the fixed Huffman code; PNG's Adam7 pass geometry) are reproduced
+from those documents.
+
+The decoder is tested against PngSuite by Willem van Schaik (2017-07-19
+release, http://www.schaik.com/pngsuite/), whose images are included in
+tests/pngsuite under their own terms: "Permission to use, copy, modify and
+distribute these images for any purpose and without fee is hereby granted."
+(tests/pngsuite/PngSuite.LICENSE). tests/pngsuite/SHA256SUMS records their
+source and hashes. They are test data only and are not part of the published
+crate.
+
+------------------------------------------------------------------------------
+Third-party components
+------------------------------------------------------------------------------
+
+thiserror (https://crates.io/crates/thiserror) — MIT OR Apache-2.0

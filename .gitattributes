@@ -1,3 +1,7 @@
 # Bash scripts, golden lists and manifests must check out with LF on every platform;
 # a core.autocrlf=true checkout otherwise reads a '' into every golden MD5 (2026-09-13).
 * text=auto eol=lf
+
+# PngSuite test images and its manifest are byte-exact data.
+*.png binary
+tests/pngsuite/** -text
