@@ -271,6 +271,9 @@ impl Decoder {
                     match parse_fctl(d, &header, &mut next_seq) {
                         Ok(control) => {
                             let is_default = idat_state == IdatState::Before;
+                            if is_default && !frames.is_empty() {
+                                anim_err.get_or_insert_with(|| "two fcTL chunks before IDAT".into());
+                            }
                             if is_default
                                 && (control.x_offset, control.y_offset, control.width, control.height)
                                     != (0, 0, header.width, header.height)
@@ -479,7 +482,9 @@ impl Decoder {
         };
         let raw = Inflater::new()
             .limit(expected)
-            .size_hint(expected)
+            // DEFLATE expands at most about 1032:1; a tiny file claiming a
+            // huge image does not get a huge allocation up front.
+            .size_hint(expected.min(zdata.len().saturating_mul(1032)))
             .check_adler(self.check_crc)
             .zlib(zdata)
             .map_err(|e| match e {
