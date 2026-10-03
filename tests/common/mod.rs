@@ -10,7 +10,7 @@ fn primes(n: usize) -> Vec<u32> {
     let mut p = Vec::new();
     let mut k = 2u32;
     while p.len() < n {
-        if p.iter().all(|&q| k % q != 0) {
+        if p.iter().all(|&q| !k.is_multiple_of(q)) {
             p.push(k);
         }
         k += 1;
@@ -31,7 +31,7 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
         msg.push(0);
     }
     msg.extend_from_slice(&((data.len() as u64) * 8).to_be_bytes());
-    for block in msg.chunks_exact(64) {
+    for block in msg.as_chunks::<64>().0 {
         let mut w = [0u32; 64];
         for i in 0..16 {
             w[i] = u32::from_be_bytes([block[4 * i], block[4 * i + 1], block[4 * i + 2], block[4 * i + 3]]);

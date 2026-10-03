@@ -28,7 +28,7 @@ fn text(n: usize) -> Vec<u8> {
     while out.len() < n {
         let w = WORDS[(r.next() % WORDS.len() as u64) as usize];
         out.extend_from_slice(w.as_bytes());
-        out.push(if r.next() % 11 == 0 { b'\n' } else { b' ' });
+        out.push(if r.next().is_multiple_of(11) { b'\n' } else { b' ' });
     }
     out.truncate(n);
     out

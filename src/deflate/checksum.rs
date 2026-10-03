@@ -51,15 +51,15 @@ impl Crc32 {
     /// Feeds `data`.
     pub fn update(&mut self, data: &[u8]) {
         let mut c = self.0;
-        let mut chunks = data.chunks_exact(4);
-        for q in &mut chunks {
-            c ^= u32::from_le_bytes([q[0], q[1], q[2], q[3]]);
+        let (quads, rest) = data.as_chunks::<4>();
+        for q in quads {
+            c ^= u32::from_le_bytes(*q);
             c = CRC[3][(c & 0xFF) as usize]
                 ^ CRC[2][((c >> 8) & 0xFF) as usize]
                 ^ CRC[1][((c >> 16) & 0xFF) as usize]
                 ^ CRC[0][(c >> 24) as usize];
         }
-        for &b in chunks.remainder() {
+        for &b in rest {
             c = CRC[0][((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8);
         }
         self.0 = c;

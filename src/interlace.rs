@@ -31,6 +31,7 @@ pub(crate) fn copy_pixel(src: &[u8], sx: usize, dst: &mut [u8], dx: usize, bpp: 
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Places the pixels of pass `p` (rows of `pass_row` bytes in `pass`) into
 /// the image `out` (rows of `row` bytes).
 pub(crate) fn scatter(p: usize, pass: &[u8], pass_row: usize, width: u32, height: u32, bpp: usize, out: &mut [u8], row: usize) {
@@ -72,9 +73,8 @@ mod tests {
     fn passes_cover_every_pixel_once() {
         for (w, h) in [(1, 1), (2, 3), (8, 8), (9, 17), (33, 5)] {
             let mut seen = vec![0u8; (w * h) as usize];
-            for p in 0..7 {
+            for (p, &(x0, y0, dx, dy)) in ADAM7.iter().enumerate() {
                 let (pw, ph) = pass_size(p, w, h);
-                let (x0, y0, dx, dy) = ADAM7[p];
                 for j in 0..ph {
                     for i in 0..pw {
                         seen[((y0 + j * dy) * w + x0 + i * dx) as usize] += 1;

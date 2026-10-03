@@ -88,7 +88,7 @@ impl<'a> Bits<'a> {
 
     /// Reads `n` aligned bytes (after [`align`](Self::align)).
     fn take_bytes(&mut self, n: usize, out: &mut Vec<u8>) -> Result<(), Error> {
-        debug_assert!(self.count % 8 == 0);
+        debug_assert!(self.count.is_multiple_of(8));
         let mut n = n;
         while n > 0 && self.count > 0 {
             out.push(self.buf as u8);
@@ -178,7 +178,7 @@ impl Inflater {
         if cmf >> 4 > 7 {
             return Err(Error::Invalid("zlib window size above 32 KiB"));
         }
-        if ((cmf as u16) << 8 | flg as u16) % 31 != 0 {
+        if !((cmf as u16) << 8 | flg as u16).is_multiple_of(31) {
             return Err(Error::Invalid("zlib header check bits are wrong"));
         }
         if flg & 0x20 != 0 {

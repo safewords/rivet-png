@@ -246,7 +246,7 @@ impl Decoder {
                     if d.is_empty() || d.len() % 3 != 0 || d.len() > 768 {
                         return Err(invalid(format!("PLTE of {} bytes", d.len())));
                     }
-                    palette = Some(d.chunks_exact(3).map(|p| [p[0], p[1], p[2]]).collect());
+                    palette = Some(d.as_chunks::<3>().0.to_vec());
                 }
                 b"IDAT" => {
                     if idat_state == IdatState::After {
@@ -379,7 +379,7 @@ impl Decoder {
                 k if k[0].is_ascii_uppercase() && !matches!(k, b"acTL" | b"fcTL" | b"fdAT") => {
                     return Err(Error::Unsupported(format!("unknown critical chunk {}", name(k))));
                 }
-                k if matches!(k, b"acTL" | b"fcTL" | b"fdAT") => {}
+                b"acTL" | b"fcTL" | b"fdAT" => {}
                 k => meta.unknown.push(UnknownChunk { kind: *k, data: d.to_vec() }),
             }
         }
