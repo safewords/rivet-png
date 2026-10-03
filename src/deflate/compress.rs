@@ -400,8 +400,12 @@ fn write_huffman(w: &mut BitWriter, tokens: &[Token], plan: &Plan, last: bool) {
 struct Params {
     /// Hash chain entries examined per search.
     chain: usize,
-    /// Defer a match by one byte if the next position matches longer.
-    lazy: bool,
+    /// Defer a match by one byte if the next position matches longer, for
+    /// matches shorter than this (0: never).
+    max_lazy: usize,
+    /// When the match in hand is at least this long, the look-ahead search
+    /// examines a quarter of the chain.
+    good: usize,
     /// A match this long ends the search.
     nice: usize,
     /// Below this level, positions inside a match are not hashed when the
@@ -411,18 +415,20 @@ struct Params {
 
 impl Params {
     fn for_level(level: u8) -> Params {
-        let (chain, lazy, nice, insert_limit) = match level {
-            1 => (4, false, 16, 8),
-            2 => (8, false, 32, 16),
-            3 => (16, false, 64, 32),
-            4 => (16, true, 32, MAX_MATCH),
-            5 => (32, true, 64, MAX_MATCH),
-            6 => (128, true, 128, MAX_MATCH),
-            7 => (256, true, MAX_MATCH, MAX_MATCH),
-            8 => (1024, true, MAX_MATCH, MAX_MATCH),
-            _ => (4096, true, MAX_MATCH, MAX_MATCH),
+        // Chosen by measurement on text, binary data and images (see the
+        // compression comparison in tests/deflate.rs).
+        let (chain, max_lazy, good, nice, insert_limit) = match level {
+            1 => (4, 0, 0, 16, 8),
+            2 => (8, 0, 0, 32, 16),
+            3 => (16, 0, 0, 64, 32),
+            4 => (16, 8, 8, 32, MAX_MATCH),
+            5 => (32, 16, 8, 64, MAX_MATCH),
+            6 => (96, 32, 16, 128, MAX_MATCH),
+            7 => (256, 64, 32, MAX_MATCH, MAX_MATCH),
+            8 => (1024, 128, 64, MAX_MATCH, MAX_MATCH),
+            _ => (4096, MAX_MATCH, MAX_MATCH, MAX_MATCH, MAX_MATCH),
         };
-        Params { chain, lazy, nice, insert_limit }
+        Params { chain, max_lazy, good, nice, insert_limit }
     }
 }
 
@@ -433,6 +439,24 @@ impl Params {
 #[inline]
 fn gain(len: usize, dist: usize) -> i32 {
     8 * len as i32 - 12 - LENGTH_EXTRA[length_code(len)] as i32 - DIST_EXTRA[dist_code(dist)] as i32
+}
+
+/// The length of the common prefix of `a` and `b` (equal lengths).
+#[inline]
+fn match_len(a: &[u8], b: &[u8]) -> usize {
+    let mut l = 0;
+    let n = a.len();
+    while l + 8 <= n {
+        let x = u64::from_le_bytes(a[l..l + 8].try_into().unwrap()) ^ u64::from_le_bytes(b[l..l + 8].try_into().unwrap());
+        if x != 0 {
+            return l + (x.trailing_zeros() / 8) as usize;
+        }
+        l += 8;
+    }
+    while l < n && a[l] == b[l] {
+        l += 1;
+    }
+    l
 }
 
 struct Matcher<'a> {
@@ -486,7 +510,7 @@ impl<'a> Matcher<'a> {
 
     /// The longest match for the bytes at `p` (positions before `p` must be
     /// in the chains, `p` itself not yet).
-    fn find(&self, p: usize) -> (usize, usize) {
+    fn find(&self, p: usize, chain: usize) -> (usize, usize) {
         let d = self.data;
         let max = MAX_MATCH.min(d.len() - p);
         if max < MIN_MATCH {
@@ -494,7 +518,7 @@ impl<'a> Matcher<'a> {
         }
         let mut best = (0usize, 0usize);
         let mut cand = self.head[self.hash(p)] as usize;
-        let mut chain = self.params.chain;
+        let mut chain = chain;
         let mut last_cand = usize::MAX;
         while cand != 0 && chain > 0 {
             let c = cand - 1;
@@ -505,10 +529,7 @@ impl<'a> Matcher<'a> {
             }
             last_cand = c;
             if d[c + best.0.min(max - 1)] == d[p + best.0.min(max - 1)] {
-                let mut l = 0;
-                while l < max && d[c + l] == d[p + l] {
-                    l += 1;
-                }
+                let l = match_len(&d[c..c + max], &d[p..p + max]);
                 if l > best.0 && (best.0 < MIN_MATCH || gain(l, p - c) > gain(best.0, best.1)) {
                     best = (l, p - c);
                     if l >= self.params.nice || l == max {
@@ -535,7 +556,7 @@ impl<'a> Matcher<'a> {
                 Some(m) => m,
                 None => {
                     self.insert_upto(p);
-                    self.find(p)
+                    self.find(p, self.params.chain)
                 }
             };
             if len < MIN_MATCH {
@@ -543,9 +564,10 @@ impl<'a> Matcher<'a> {
                 self.pos += 1;
                 continue;
             }
-            if self.params.lazy && len < self.params.nice && p + 1 < n {
+            if len < self.params.max_lazy && len < self.params.nice && p + 1 < n {
                 self.insert_upto(p + 1);
-                let next = self.find(p + 1);
+                let chain = if len >= self.params.good { self.params.chain / 4 } else { self.params.chain };
+                let next = self.find(p + 1, chain.max(1));
                 if next.0 > len && gain(next.0, next.1) > gain(len, dist) {
                     tokens.push(Token::Lit(self.data[p]));
                     self.pos += 1;
