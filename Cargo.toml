@@ -1,0 +1,24 @@
+[package]
+name = "rivet-png"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license-file = "LICENSE.md"
+readme = "README.md"
+repository = "https://github.com/rivet-transcoder/rivet-png"
+homepage = "https://github.com/rivet-transcoder/rivet-png"
+documentation = "https://docs.rs/rivet-png"
+authors = ["Ely Erin Fox"]
+description = "A PNG and APNG decoder and encoder in Rust, with its own DEFLATE / zlib (inflate and deflate), written from the W3C PNG specification (third edition) and RFCs 1950 and 1951: no C, no system libraries, no build script. Every colour type and bit depth, Adam7, palette and tRNS, colour metadata (gAMA, cHRM, sRGB, iCCP, cICP, mDCV, cLLI), eXIf, text, APNG frames with dispose and blend. rivet's still-image PNG codec. Imported as `rpng`."
+keywords = ["png", "apng", "deflate", "zlib", "image"]
+categories = ["multimedia::images", "compression", "encoding"]
+exclude = [".github/", "docs/", "tests/pngsuite/"]
+
+[lib]
+name = "rpng"
+
+[dependencies]
+thiserror = "2"
+
+[features]
+default = []
