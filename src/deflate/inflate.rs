@@ -113,6 +113,9 @@ pub struct Inflated {
     /// the header and the Adler-32 trailer); anything after is not part of
     /// it.
     pub consumed: usize,
+    /// How many blocks of each type the stream had: stored, fixed Huffman,
+    /// dynamic Huffman.
+    pub blocks: [usize; 3],
 }
 
 /// A configurable decompressor: an output limit and whether a zlib trailer's
@@ -159,8 +162,8 @@ impl Inflater {
     pub fn inflate(&self, input: &[u8]) -> Result<Inflated, Error> {
         let mut out = Vec::with_capacity(self.size_hint.min(self.limit).min(1 << 28));
         let mut br = Bits::new(input);
-        inflate_blocks(&mut br, &mut out, self.limit)?;
-        Ok(Inflated { data: out, consumed: br.bytes_used() })
+        let blocks = inflate_blocks(&mut br, &mut out, self.limit)?;
+        Ok(Inflated { data: out, consumed: br.bytes_used(), blocks })
     }
 
     /// Decompresses a zlib stream (RFC 1950) from the start of `input`.
@@ -183,7 +186,7 @@ impl Inflater {
         }
         let mut out = Vec::with_capacity(self.size_hint.min(self.limit).min(1 << 28));
         let mut br = Bits::new(&input[2..]);
-        inflate_blocks(&mut br, &mut out, self.limit)?;
+        let blocks = inflate_blocks(&mut br, &mut out, self.limit)?;
         br.align();
         let at = 2 + br.bytes_used();
         let trailer = input.get(at..at + 4).ok_or(Error::Truncated)?;
@@ -194,7 +197,7 @@ impl Inflater {
                 return Err(Error::Checksum { expected, actual });
             }
         }
-        Ok(Inflated { data: out, consumed: at + 4 })
+        Ok(Inflated { data: out, consumed: at + 4, blocks })
     }
 }
 
@@ -210,11 +213,16 @@ pub fn zlib_decompress(input: &[u8]) -> Result<Vec<u8>, Error> {
     Inflater::new().zlib(input).map(|r| r.data)
 }
 
-fn inflate_blocks(br: &mut Bits, out: &mut Vec<u8>, limit: usize) -> Result<(), Error> {
+fn inflate_blocks(br: &mut Bits, out: &mut Vec<u8>, limit: usize) -> Result<[usize; 3], Error> {
     let mut fixed: Option<(Decoder, Decoder)> = None;
+    let mut blocks = [0usize; 3];
     loop {
         let last = br.bits(1)? == 1;
-        match br.bits(2)? {
+        let btype = br.bits(2)?;
+        if btype < 3 {
+            blocks[btype as usize] += 1;
+        }
+        match btype {
             0 => {
                 br.align();
                 let len = br.bits(16)?;
@@ -244,7 +252,7 @@ fn inflate_blocks(br: &mut Bits, out: &mut Vec<u8>, limit: usize) -> Result<(), 
             _ => return Err(Error::Invalid("reserved block type 3")),
         }
         if last {
-            return Ok(());
+            return Ok(blocks);
         }
     }
 }

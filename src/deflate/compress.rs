@@ -101,7 +101,26 @@ pub fn deflate_with(data: &[u8], options: &Options) -> Vec<u8> {
         return w.finish();
     }
     let max_symbols = if options.block_symbols == 0 { 16384 } else { options.block_symbols };
-    let params = Params::for_level(level);
+    let main = lz_blocks(data, Params::for_level(level), block_type, max_symbols, w);
+    if level >= 8 {
+        // Long hash chains find longer but farther matches, which can cost
+        // more than they save once the distances are Huffman coded; the
+        // slowest levels also try a short-chain parse and keep the smaller.
+        let alt = lz_blocks(
+            data,
+            Params::for_level(4),
+            block_type,
+            max_symbols,
+            BitWriter::with_capacity(main.len() + 64),
+        );
+        if alt.len() < main.len() {
+            return alt;
+        }
+    }
+    main
+}
+
+fn lz_blocks(data: &[u8], params: Params, block_type: BlockType, max_symbols: usize, mut w: BitWriter) -> Vec<u8> {
     let mut matcher = Matcher::new(data, params);
     let mut tokens = Vec::with_capacity(max_symbols);
     let mut block_start = 0;
@@ -407,6 +426,15 @@ impl Params {
     }
 }
 
+/// Roughly the bits a match saves over coding its bytes as literals: eight
+/// per byte, less a typical length code (7 bits) and distance code (5), and
+/// their extra bits. Steers the choice between a longer, farther match and
+/// a shorter, nearer one.
+#[inline]
+fn gain(len: usize, dist: usize) -> i32 {
+    8 * len as i32 - 12 - LENGTH_EXTRA[length_code(len)] as i32 - DIST_EXTRA[dist_code(dist)] as i32
+}
+
 struct Matcher<'a> {
     data: &'a [u8],
     params: Params,
@@ -481,7 +509,7 @@ impl<'a> Matcher<'a> {
                 while l < max && d[c + l] == d[p + l] {
                     l += 1;
                 }
-                if l > best.0 {
+                if l > best.0 && (best.0 < MIN_MATCH || gain(l, p - c) > gain(best.0, best.1)) {
                     best = (l, p - c);
                     if l >= self.params.nice || l == max {
                         break;
@@ -518,7 +546,7 @@ impl<'a> Matcher<'a> {
             if self.params.lazy && len < self.params.nice && p + 1 < n {
                 self.insert_upto(p + 1);
                 let next = self.find(p + 1);
-                if next.0 > len {
+                if next.0 > len && gain(next.0, next.1) > gain(len, dist) {
                     tokens.push(Token::Lit(self.data[p]));
                     self.pos += 1;
                     self.pending = Some(next);
