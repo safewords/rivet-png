@@ -105,8 +105,22 @@ pub struct Image {
 impl Image {
     /// An image with no palette and no transparency; checks the size of
     /// `data` and the colour type / depth combination.
-    pub fn new(width: u32, height: u32, color_type: ColorType, bit_depth: u8, data: Vec<u8>) -> Result<Image> {
-        let img = Image { width, height, color_type, bit_depth, palette: None, transparency: None, data };
+    pub fn new(
+        width: u32,
+        height: u32,
+        color_type: ColorType,
+        bit_depth: u8,
+        data: Vec<u8>,
+    ) -> Result<Image> {
+        let img = Image {
+            width,
+            height,
+            color_type,
+            bit_depth,
+            palette: None,
+            transparency: None,
+            data,
+        };
         img.validate()?;
         Ok(img)
     }
@@ -136,18 +150,31 @@ impl Image {
                 self.bit_depth
             )));
         }
-        if self.width == 0 || self.height == 0 || self.width > 0x7FFF_FFFF || self.height > 0x7FFF_FFFF {
-            return Err(config(format!("dimensions {}x{} out of range", self.width, self.height)));
+        if self.width == 0
+            || self.height == 0
+            || self.width > 0x7FFF_FFFF
+            || self.height > 0x7FFF_FFFF
+        {
+            return Err(config(format!(
+                "dimensions {}x{} out of range",
+                self.width, self.height
+            )));
         }
         let want = (self.row_bytes() as u128) * self.height as u128;
         if self.data.len() as u128 != want {
-            return Err(config(format!("{} bytes of samples, the image needs {want}", self.data.len())));
+            return Err(config(format!(
+                "{} bytes of samples, the image needs {want}",
+                self.data.len()
+            )));
         }
         if let Some(p) = &self.palette {
             if p.is_empty() || p.len() > 256 {
                 return Err(config(format!("a palette of {} entries", p.len())));
             }
-            if matches!(self.color_type, ColorType::Grayscale | ColorType::GrayscaleAlpha) {
+            if matches!(
+                self.color_type,
+                ColorType::Grayscale | ColorType::GrayscaleAlpha
+            ) {
                 return Err(config("a palette on a greyscale image"));
             }
             if self.color_type == ColorType::Indexed && p.len() > 1 << self.bit_depth {
@@ -230,7 +257,12 @@ impl Image {
                         out.extend_from_slice(&[g, g, g, scale(s(1))]);
                     }
                     ColorType::Rgba => {
-                        out.extend_from_slice(&[scale(s(0)), scale(s(1)), scale(s(2)), scale(s(3))]);
+                        out.extend_from_slice(&[
+                            scale(s(0)),
+                            scale(s(1)),
+                            scale(s(2)),
+                            scale(s(3)),
+                        ]);
                     }
                 }
             }
@@ -243,9 +275,15 @@ impl Image {
     pub fn to_rgba8(&self) -> Vec<u8> {
         if self.bit_depth <= 8 {
             // Exact: every value of to_rgba16 is then a multiple of 257.
-            self.to_rgba16().into_iter().map(|v| (v >> 8) as u8).collect()
+            self.to_rgba16()
+                .into_iter()
+                .map(|v| (v >> 8) as u8)
+                .collect()
         } else {
-            self.to_rgba16().into_iter().map(|v| ((v as u32 * 255 + 32895) >> 16) as u8).collect()
+            self.to_rgba16()
+                .into_iter()
+                .map(|v| ((v as u32 * 255 + 32895) >> 16) as u8)
+                .collect()
         }
     }
 }

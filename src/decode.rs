@@ -67,7 +67,11 @@ pub fn read_header(bytes: &[u8]) -> Result<Header> {
     if bytes.len() < 8 || bytes[..8] != SIGNATURE {
         return Err(invalid("not a PNG signature"));
     }
-    let mut chunks = Chunks { bytes, pos: 8, check_crc: true };
+    let mut chunks = Chunks {
+        bytes,
+        pos: 8,
+        check_crc: true,
+    };
     let c = chunks.next_chunk()?;
     if &c.kind != b"IHDR" {
         return Err(invalid("the first chunk is not IHDR"));
@@ -89,19 +93,28 @@ struct Chunks<'a> {
 impl<'a> Chunks<'a> {
     fn next_chunk(&mut self) -> Result<Chunk<'a>> {
         let b = self.bytes;
-        let head = b.get(self.pos..self.pos + 8).ok_or_else(|| invalid("truncated: the file ends before IEND"))?;
+        let head = b
+            .get(self.pos..self.pos + 8)
+            .ok_or_else(|| invalid("truncated: the file ends before IEND"))?;
         let len = u32::from_be_bytes([head[0], head[1], head[2], head[3]]);
         if len > 0x7FFF_FFFF {
             return Err(invalid("a chunk length above 2^31 - 1"));
         }
         let kind = [head[4], head[5], head[6], head[7]];
         if !kind.iter().all(|c| c.is_ascii_alphabetic()) {
-            return Err(invalid(format!("chunk type {:?} is not four letters", kind)));
+            return Err(invalid(format!(
+                "chunk type {:?} is not four letters",
+                kind
+            )));
         }
         let start = self.pos + 8;
         let end = start + len as usize;
-        let data = b.get(start..end).ok_or_else(|| invalid(format!("truncated {} chunk", name(&kind))))?;
-        let crc = b.get(end..end + 4).ok_or_else(|| invalid(format!("truncated {} chunk", name(&kind))))?;
+        let data = b
+            .get(start..end)
+            .ok_or_else(|| invalid(format!("truncated {} chunk", name(&kind))))?;
+        let crc = b
+            .get(end..end + 4)
+            .ok_or_else(|| invalid(format!("truncated {} chunk", name(&kind))))?;
         if self.check_crc {
             let stored = u32::from_be_bytes([crc[0], crc[1], crc[2], crc[3]]);
             let mut c = Crc32::new();
@@ -137,10 +150,13 @@ fn parse_ihdr(d: &[u8]) -> Result<Header> {
         return Err(invalid(format!("dimensions {width}x{height} out of range")));
     }
     let bit_depth = d[8];
-    let color_type =
-        ColorType::from_code(d[9]).ok_or_else(|| invalid(format!("colour type {} does not exist", d[9])))?;
+    let color_type = ColorType::from_code(d[9])
+        .ok_or_else(|| invalid(format!("colour type {} does not exist", d[9])))?;
     if !color_type.allows(bit_depth) {
-        return Err(invalid(format!("colour type {} does not allow bit depth {bit_depth}", d[9])));
+        return Err(invalid(format!(
+            "colour type {} does not allow bit depth {bit_depth}",
+            d[9]
+        )));
     }
     if d[10] != 0 {
         return Err(Error::Unsupported(format!("compression method {}", d[10])));
@@ -153,7 +169,13 @@ fn parse_ihdr(d: &[u8]) -> Result<Header> {
         1 => true,
         m => return Err(invalid(format!("interlace method {m}"))),
     };
-    Ok(Header { width, height, bit_depth, color_type, interlaced })
+    Ok(Header {
+        width,
+        height,
+        bit_depth,
+        color_type,
+        interlaced,
+    })
 }
 
 #[derive(PartialEq)]
@@ -173,7 +195,11 @@ struct PendingFrame {
 impl Decoder {
     /// CRCs checked, 2^28 pixels at most, frames decoded.
     pub fn new() -> Self {
-        Decoder { check_crc: true, max_pixels: 1 << 28, animation: true }
+        Decoder {
+            check_crc: true,
+            max_pixels: 1 << 28,
+            animation: true,
+        }
     }
 
     /// Whether chunk CRCs and the zlib Adler-32 are checked (default true).
@@ -200,7 +226,11 @@ impl Decoder {
         if bytes.len() < 8 || bytes[..8] != SIGNATURE {
             return Err(invalid("not a PNG signature"));
         }
-        let mut chunks = Chunks { bytes, pos: 8, check_crc: self.check_crc };
+        let mut chunks = Chunks {
+            bytes,
+            pos: 8,
+            check_crc: self.check_crc,
+        };
         let first = chunks.next_chunk()?;
         if &first.kind != b"IHDR" {
             return Err(invalid("the first chunk is not IHDR"));
@@ -208,7 +238,10 @@ impl Decoder {
         let header = parse_ihdr(first.data)?;
         let pixels = header.width as u64 * header.height as u64;
         if pixels > self.max_pixels {
-            return Err(Error::Limit(format!("{}x{} pixels", header.width, header.height)));
+            return Err(Error::Limit(format!(
+                "{}x{} pixels",
+                header.width, header.height
+            )));
         }
         let ct = header.color_type;
         let mut palette: Option<Vec<[u8; 3]>> = None;
@@ -260,42 +293,52 @@ impl Decoder {
                 }
                 b"acTL" if self.animation => {
                     if idat_state != IdatState::Before || actl.is_some() || d.len() != 8 {
-                        anim_err.get_or_insert_with(|| "misplaced, repeated or malformed acTL".into());
+                        anim_err
+                            .get_or_insert_with(|| "misplaced, repeated or malformed acTL".into());
                     } else if be32(d, 0) == 0 {
                         anim_err.get_or_insert_with(|| "acTL with zero frames".into());
                     } else {
                         actl = Some((be32(d, 0), be32(d, 4)));
                     }
                 }
-                b"fcTL" if self.animation => {
-                    match parse_fctl(d, &header, &mut next_seq) {
-                        Ok(control) => {
-                            let is_default = idat_state == IdatState::Before;
-                            if is_default && !frames.is_empty() {
-                                anim_err.get_or_insert_with(|| "two fcTL chunks before IDAT".into());
-                            }
-                            if is_default
-                                && (control.x_offset, control.y_offset, control.width, control.height)
-                                    != (0, 0, header.width, header.height)
-                            {
-                                anim_err.get_or_insert_with(|| "the default image's fcTL is not the full canvas".into());
-                            }
-                            if let Some(prev) = frames.last()
-                                && !prev.is_default
-                                && prev.data.is_empty()
-                            {
-                                anim_err.get_or_insert_with(|| "a frame without fdAT data".into());
-                            }
-                            frames.push(PendingFrame { control, data: Vec::new(), is_default });
+                b"fcTL" if self.animation => match parse_fctl(d, &header, &mut next_seq) {
+                    Ok(control) => {
+                        let is_default = idat_state == IdatState::Before;
+                        if is_default && !frames.is_empty() {
+                            anim_err.get_or_insert_with(|| "two fcTL chunks before IDAT".into());
                         }
-                        Err(e) => {
-                            anim_err.get_or_insert(e);
+                        if is_default
+                            && (
+                                control.x_offset,
+                                control.y_offset,
+                                control.width,
+                                control.height,
+                            ) != (0, 0, header.width, header.height)
+                        {
+                            anim_err.get_or_insert_with(|| {
+                                "the default image's fcTL is not the full canvas".into()
+                            });
                         }
+                        if let Some(prev) = frames.last()
+                            && !prev.is_default
+                            && prev.data.is_empty()
+                        {
+                            anim_err.get_or_insert_with(|| "a frame without fdAT data".into());
+                        }
+                        frames.push(PendingFrame {
+                            control,
+                            data: Vec::new(),
+                            is_default,
+                        });
                     }
-                }
+                    Err(e) => {
+                        anim_err.get_or_insert(e);
+                    }
+                },
                 b"fdAT" if self.animation => {
                     if d.len() < 4 {
-                        anim_err.get_or_insert_with(|| "fdAT shorter than its sequence number".into());
+                        anim_err
+                            .get_or_insert_with(|| "fdAT shorter than its sequence number".into());
                     } else if be32(d, 0) != next_seq {
                         anim_err.get_or_insert_with(|| "fdAT out of sequence".into());
                     } else {
@@ -303,7 +346,8 @@ impl Decoder {
                         match frames.last_mut() {
                             Some(f) if !f.is_default => f.data.extend_from_slice(&d[4..]),
                             _ => {
-                                anim_err.get_or_insert_with(|| "fdAT without a preceding fcTL".into());
+                                anim_err
+                                    .get_or_insert_with(|| "fdAT without a preceding fcTL".into());
                             }
                         }
                     }
@@ -316,7 +360,12 @@ impl Decoder {
                 b"gAMA" if d.len() == 4 => meta.gamma = Some(be32(d, 0)),
                 b"cHRM" if d.len() == 32 => {
                     let p = |i: usize| (be32(d, 8 * i), be32(d, 8 * i + 4));
-                    meta.chromaticities = Some(Chromaticities { white: p(0), red: p(1), green: p(2), blue: p(3) });
+                    meta.chromaticities = Some(Chromaticities {
+                        white: p(0),
+                        red: p(1),
+                        green: p(2),
+                        blue: p(3),
+                    });
                 }
                 b"sRGB" if d.len() == 1 => meta.srgb = Some(d[0]),
                 b"iCCP" => {
@@ -342,10 +391,17 @@ impl Decoder {
                     });
                 }
                 b"cLLI" if d.len() == 8 => {
-                    meta.content_light_level = Some(ContentLightLevel { max_cll: be32(d, 0), max_fall: be32(d, 4) })
+                    meta.content_light_level = Some(ContentLightLevel {
+                        max_cll: be32(d, 0),
+                        max_fall: be32(d, 4),
+                    })
                 }
                 b"sBIT" => {
-                    let n = if ct == ColorType::Indexed { 3 } else { ct.channels() };
+                    let n = if ct == ColorType::Indexed {
+                        3
+                    } else {
+                        ct.channels()
+                    };
                     if d.len() == n {
                         meta.significant_bits = Some(d.to_vec());
                     }
@@ -353,7 +409,9 @@ impl Decoder {
                 b"bKGD" => {
                     meta.background = match (ct, d.len()) {
                         (ColorType::Indexed, 1) => Some(Background::Palette(d[0])),
-                        (ColorType::Grayscale | ColorType::GrayscaleAlpha, 2) => Some(Background::Gray(be16(d, 0))),
+                        (ColorType::Grayscale | ColorType::GrayscaleAlpha, 2) => {
+                            Some(Background::Gray(be16(d, 0)))
+                        }
                         (ColorType::Rgb | ColorType::Rgba, 6) => {
                             Some(Background::Rgb(be16(d, 0), be16(d, 2), be16(d, 4)))
                         }
@@ -361,7 +419,11 @@ impl Decoder {
                     }
                 }
                 b"pHYs" if d.len() == 9 => {
-                    meta.physical = Some(PhysicalDimensions { x: be32(d, 0), y: be32(d, 4), metre: d[8] == 1 })
+                    meta.physical = Some(PhysicalDimensions {
+                        x: be32(d, 0),
+                        y: be32(d, 4),
+                        metre: d[8] == 1,
+                    })
                 }
                 b"tIME" if d.len() == 7 => {
                     meta.time = Some(Time {
@@ -380,10 +442,16 @@ impl Decoder {
                     }
                 }
                 k if k[0].is_ascii_uppercase() && !matches!(k, b"acTL" | b"fcTL" | b"fdAT") => {
-                    return Err(Error::Unsupported(format!("unknown critical chunk {}", name(k))));
+                    return Err(Error::Unsupported(format!(
+                        "unknown critical chunk {}",
+                        name(k)
+                    )));
                 }
                 b"acTL" | b"fcTL" | b"fdAT" => {}
-                k => meta.unknown.push(UnknownChunk { kind: *k, data: d.to_vec() }),
+                k => meta.unknown.push(UnknownChunk {
+                    kind: *k,
+                    data: d.to_vec(),
+                }),
             }
         }
         if idat_state == IdatState::Before {
@@ -404,14 +472,19 @@ impl Decoder {
         let mut animation = None;
         if let Some((num_frames, num_plays)) = actl {
             if anim_err.is_none() && frames.len() as u32 != num_frames {
-                anim_err = Some(format!("acTL says {num_frames} frames, the file has {}", frames.len()));
+                anim_err = Some(format!(
+                    "acTL says {num_frames} frames, the file has {}",
+                    frames.len()
+                ));
             }
             if anim_err.is_none() {
                 match self.decode_frames(&frames, &image, &header, &palette, &trns) {
                     Ok(out) => {
                         animation = Some(Animation {
                             num_plays,
-                            default_image_is_first_frame: frames.first().is_some_and(|f| f.is_default),
+                            default_image_is_first_frame: frames
+                                .first()
+                                .is_some_and(|f| f.is_default),
                             frames: out,
                         })
                     }
@@ -446,9 +519,19 @@ impl Decoder {
                 if f.data.is_empty() {
                     return Err(invalid("a frame without fdAT data"));
                 }
-                self.decode_image(&f.data, f.control.width, f.control.height, header, palette.clone(), trns.clone())?
+                self.decode_image(
+                    &f.data,
+                    f.control.width,
+                    f.control.height,
+                    header,
+                    palette.clone(),
+                    trns.clone(),
+                )?
             };
-            out.push(Frame { control: f.control, image });
+            out.push(Frame {
+                control: f.control,
+                image,
+            });
         }
         Ok(out)
     }
@@ -474,7 +557,11 @@ impl Decoder {
             (0..7)
                 .map(|p| {
                     let (pw, ph) = pass_size(p, width, height);
-                    if pw == 0 || ph == 0 { 0 } else { ph as usize * (1 + (pw as usize * bits).div_ceil(8)) }
+                    if pw == 0 || ph == 0 {
+                        0
+                    } else {
+                        ph as usize * (1 + (pw as usize * bits).div_ceil(8))
+                    }
                 })
                 .sum()
         } else {
@@ -494,7 +581,10 @@ impl Decoder {
             })?
             .data;
         if raw.len() < expected {
-            return Err(invalid(format!("{} bytes of image data, the image needs {expected}", raw.len())));
+            return Err(invalid(format!(
+                "{} bytes of image data, the image needs {expected}",
+                raw.len()
+            )));
         }
         let mut data = vec![0u8; row * height as usize];
         if header.interlaced {
@@ -505,7 +595,12 @@ impl Decoder {
                     continue;
                 }
                 let prow = (pw as usize * bits).div_ceil(8);
-                let pass = unfilter_rows(&raw[off..off + ph as usize * (1 + prow)], prow, ph as usize, bpp)?;
+                let pass = unfilter_rows(
+                    &raw[off..off + ph as usize * (1 + prow)],
+                    prow,
+                    ph as usize,
+                    bpp,
+                )?;
                 off += ph as usize * (1 + prow);
                 scatter(p, &pass, prow, width, height, bits, &mut data, row);
             }
@@ -520,7 +615,15 @@ impl Decoder {
                 }
             }
         }
-        Ok(Image { width, height, color_type: ct, bit_depth: depth, palette, transparency, data })
+        Ok(Image {
+            width,
+            height,
+            color_type: ct,
+            bit_depth: depth,
+            palette,
+            transparency,
+            data,
+        })
     }
 }
 
@@ -529,11 +632,16 @@ fn unfilter_rows(raw: &[u8], row: usize, rows: usize, bpp: usize) -> Result<Vec<
     let zero = vec![0u8; row];
     for y in 0..rows {
         let src = &raw[y * (row + 1)..(y + 1) * (row + 1)];
-        let f = Filter::from_code(src[0]).ok_or_else(|| invalid(format!("filter type {}", src[0])))?;
+        let f =
+            Filter::from_code(src[0]).ok_or_else(|| invalid(format!("filter type {}", src[0])))?;
         let (before, cur) = out.split_at_mut(y * row);
         let cur = &mut cur[..row];
         cur.copy_from_slice(&src[1..]);
-        let prev = if y == 0 { &zero[..] } else { &before[(y - 1) * row..] };
+        let prev = if y == 0 {
+            &zero[..]
+        } else {
+            &before[(y - 1) * row..]
+        };
         unfilter(f, cur, prev, bpp);
     }
     Ok(out)
@@ -542,13 +650,21 @@ fn unfilter_rows(raw: &[u8], row: usize, rows: usize, bpp: usize) -> Result<Vec<
 fn parse_trns(d: &[u8], ct: ColorType, palette_len: usize) -> Option<Transparency> {
     match ct {
         ColorType::Grayscale if d.len() == 2 => Some(Transparency::Gray(be16(d, 0))),
-        ColorType::Rgb if d.len() == 6 => Some(Transparency::Rgb(be16(d, 0), be16(d, 2), be16(d, 4))),
-        ColorType::Indexed if palette_len > 0 && d.len() <= palette_len => Some(Transparency::Palette(d.to_vec())),
+        ColorType::Rgb if d.len() == 6 => {
+            Some(Transparency::Rgb(be16(d, 0), be16(d, 2), be16(d, 4)))
+        }
+        ColorType::Indexed if palette_len > 0 && d.len() <= palette_len => {
+            Some(Transparency::Palette(d.to_vec()))
+        }
         _ => None,
     }
 }
 
-fn parse_fctl(d: &[u8], h: &Header, next_seq: &mut u32) -> std::result::Result<FrameControl, String> {
+fn parse_fctl(
+    d: &[u8],
+    h: &Header,
+    next_seq: &mut u32,
+) -> std::result::Result<FrameControl, String> {
     if d.len() != 26 {
         return Err("fcTL is not 26 bytes".into());
     }
@@ -644,7 +760,11 @@ fn parse_text(kind: &[u8; 4], d: &[u8]) -> Option<Text> {
             let n2 = rest.iter().position(|&c| c == 0)?;
             let translated = String::from_utf8(rest[..n2].to_vec()).ok()?;
             let body = &rest[n2 + 1..];
-            let text = if compressed { inflate_text(body)? } else { body.to_vec() };
+            let text = if compressed {
+                inflate_text(body)?
+            } else {
+                body.to_vec()
+            };
             Some(Text {
                 keyword: kw,
                 text: String::from_utf8(text).ok()?,
@@ -681,7 +801,10 @@ pub struct ComposedFrame {
 impl ComposedFrame {
     /// The canvas as 8-bit RGBA, rounded.
     pub fn to_rgba8(&self) -> Vec<u8> {
-        self.rgba16.iter().map(|&v| ((v as u32 * 255 + 32895) >> 16) as u8).collect()
+        self.rgba16
+            .iter()
+            .map(|&v| ((v as u32 * 255 + 32895) >> 16) as u8)
+            .collect()
     }
 }
 
@@ -696,8 +819,17 @@ impl Animation {
         let mut out = Vec::with_capacity(self.frames.len());
         for (i, f) in self.frames.iter().enumerate() {
             let c = &f.control;
-            let (fx, fy, fw, fh) = (c.x_offset as usize, c.y_offset as usize, c.width as usize, c.height as usize);
-            if fx + fw > cw || fy + fh > ch || f.image.width as usize != fw || f.image.height as usize != fh {
+            let (fx, fy, fw, fh) = (
+                c.x_offset as usize,
+                c.y_offset as usize,
+                c.width as usize,
+                c.height as usize,
+            );
+            if fx + fw > cw
+                || fy + fh > ch
+                || f.image.width as usize != fw
+                || f.image.height as usize != fh
+            {
                 continue;
             }
             let mut dispose = c.dispose;
@@ -723,7 +855,11 @@ impl Animation {
                     }
                 }
             }
-            out.push(ComposedFrame { rgba16: canvas.clone(), delay_num: c.delay_num, delay_den: c.delay_den });
+            out.push(ComposedFrame {
+                rgba16: canvas.clone(),
+                delay_num: c.delay_num,
+                delay_den: c.delay_den,
+            });
             match dispose {
                 DisposeOp::None => {}
                 DisposeOp::Background => {

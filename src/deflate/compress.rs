@@ -50,7 +50,12 @@ pub struct Options {
 
 impl Default for Options {
     fn default() -> Self {
-        Options { level: 6, block_type: BlockType::Auto, block_symbols: 0, threads: 0 }
+        Options {
+            level: 6,
+            block_type: BlockType::Auto,
+            block_symbols: 0,
+            threads: 0,
+        }
     }
 }
 
@@ -61,12 +66,24 @@ const SEGMENT: usize = 1 << 18;
 /// Compresses `data` into a raw DEFLATE stream at `level` (0-9; above 9 is
 /// taken as 9).
 pub fn deflate(data: &[u8], level: u8) -> Vec<u8> {
-    deflate_with(data, &Options { level, ..Default::default() })
+    deflate_with(
+        data,
+        &Options {
+            level,
+            ..Default::default()
+        },
+    )
 }
 
 /// Compresses `data` into a zlib stream (RFC 1950) at `level`.
 pub fn zlib_compress(data: &[u8], level: u8) -> Vec<u8> {
-    zlib_compress_with(data, &Options { level, ..Default::default() })
+    zlib_compress_with(
+        data,
+        &Options {
+            level,
+            ..Default::default()
+        },
+    )
 }
 
 /// Compresses `data` into a zlib stream with `options`.
@@ -92,7 +109,11 @@ pub fn zlib_compress_with(data: &[u8], options: &Options) -> Vec<u8> {
 /// Compresses `data` into a raw DEFLATE stream with `options`.
 pub fn deflate_with(data: &[u8], options: &Options) -> Vec<u8> {
     let level = options.level.min(9);
-    let block_type = if level == 0 { BlockType::Stored } else { options.block_type };
+    let block_type = if level == 0 {
+        BlockType::Stored
+    } else {
+        options.block_type
+    };
     let mut w = BitWriter::with_capacity(data.len() / 2 + 64);
     if data.is_empty() {
         // One final block holding nothing.
@@ -109,18 +130,38 @@ pub fn deflate_with(data: &[u8], options: &Options) -> Vec<u8> {
         write_stored(&mut w, data, true);
         return w.finish();
     }
-    let max_symbols = if options.block_symbols == 0 { 16384 } else { options.block_symbols };
+    let max_symbols = if options.block_symbols == 0 {
+        16384
+    } else {
+        options.block_symbols
+    };
     let segments = data.len().div_ceil(SEGMENT);
     let coded = crate::par::map(segments, options.threads, |i| {
         let (start, end) = (i * SEGMENT, ((i + 1) * SEGMENT).min(data.len()));
         let last = end == data.len();
-        let main = lz_blocks(data, start, end, Params::for_level(level), block_type, max_symbols, last);
+        let main = lz_blocks(
+            data,
+            start,
+            end,
+            Params::for_level(level),
+            block_type,
+            max_symbols,
+            last,
+        );
         if level >= 8 {
             // Long hash chains find longer but farther matches, which can
             // cost more than they save once the distances are Huffman coded;
             // the slowest levels also try a short-chain parse and keep the
             // smaller.
-            let alt = lz_blocks(data, start, end, Params::for_level(4), block_type, max_symbols, last);
+            let alt = lz_blocks(
+                data,
+                start,
+                end,
+                Params::for_level(4),
+                block_type,
+                max_symbols,
+                last,
+            );
             if estimate(&alt) < estimate(&main) {
                 return alt;
             }
@@ -152,7 +193,10 @@ struct CodedBlock {
 
 /// A segment's size in bits, taking each block stored when that is smaller.
 fn estimate(blocks: &[CodedBlock]) -> u64 {
-    blocks.iter().map(|b| b.bits.min(stored_cost(b.raw.len(), 0))).sum()
+    blocks
+        .iter()
+        .map(|b| b.bits.min(stored_cost(b.raw.len(), 0)))
+        .sum()
 }
 
 /// Matches `data[start..end]` (with the 32 KiB before `start` as history)
@@ -181,7 +225,11 @@ fn lz_blocks(
             BlockType::Dynamic => Plan::dynamic(&tokens),
             _ => {
                 let dynamic = Plan::dynamic(&tokens);
-                if fixed.cost(&tokens) <= dynamic.cost(&tokens) { fixed } else { dynamic }
+                if fixed.cost(&tokens) <= dynamic.cost(&tokens) {
+                    fixed
+                } else {
+                    dynamic
+                }
             }
         };
         let mut coded = BitWriter::with_capacity(tokens.len() + 64);
@@ -214,7 +262,11 @@ struct BitWriter {
 
 impl BitWriter {
     fn with_capacity(n: usize) -> Self {
-        BitWriter { out: Vec::with_capacity(n), buf: 0, count: 0 }
+        BitWriter {
+            out: Vec::with_capacity(n),
+            buf: 0,
+            count: 0,
+        }
     }
 
     #[inline]
@@ -306,7 +358,13 @@ impl Plan {
     fn fixed() -> Plan {
         let lit_len = fixed_litlen_lengths().to_vec();
         let dist_len = FIXED_DIST_LENGTHS.to_vec();
-        Plan { dynamic: false, lit_code: codes(&lit_len), dist_code: codes(&dist_len), lit_len, dist_len }
+        Plan {
+            dynamic: false,
+            lit_code: codes(&lit_len),
+            dist_code: codes(&dist_len),
+            lit_len,
+            dist_len,
+        }
     }
 
     fn dynamic(tokens: &[Token]) -> Plan {
@@ -326,7 +384,13 @@ impl Plan {
         // `lengths` gives a two-code tree even for zero or one used
         // distance; strict decoders reject a lone one-bit code.
         let dist_len = lengths(&df, 15);
-        Plan { dynamic: true, lit_code: codes(&lit_len), dist_code: codes(&dist_len), lit_len, dist_len }
+        Plan {
+            dynamic: true,
+            lit_code: codes(&lit_len),
+            dist_code: codes(&dist_len),
+            lit_len,
+            dist_len,
+        }
     }
 
     /// The block's size in bits, header included.
@@ -338,7 +402,8 @@ impl Plan {
                 Token::Match { len, dist } => {
                     let lc = length_code(len as usize);
                     let dc = dist_code(dist as usize);
-                    (self.lit_len[257 + lc] + LENGTH_EXTRA[lc] + self.dist_len[dc] + DIST_EXTRA[dc]) as u64
+                    (self.lit_len[257 + lc] + LENGTH_EXTRA[lc] + self.dist_len[dc] + DIST_EXTRA[dc])
+                        as u64
                 }
             };
         }
@@ -349,8 +414,18 @@ impl Plan {
     }
 
     fn header(&self) -> Header {
-        let hlit = 257.max(self.lit_len.iter().rposition(|&l| l != 0).map_or(0, |p| p + 1));
-        let hdist = 1.max(self.dist_len.iter().rposition(|&l| l != 0).map_or(0, |p| p + 1));
+        let hlit = 257.max(
+            self.lit_len
+                .iter()
+                .rposition(|&l| l != 0)
+                .map_or(0, |p| p + 1),
+        );
+        let hdist = 1.max(
+            self.dist_len
+                .iter()
+                .rposition(|&l| l != 0)
+                .map_or(0, |p| p + 1),
+        );
         let mut seq: Vec<u8> = self.lit_len[..hlit].to_vec();
         seq.extend_from_slice(&self.dist_len[..hdist]);
         // Run-length code the lengths with symbols 16 (repeat the previous
@@ -394,7 +469,12 @@ impl Plan {
         }
         let cl_len = lengths(&cf, 7);
         let cl_code = codes(&cl_len);
-        let hclen = 4.max(CLEN_ORDER.iter().rposition(|&s| cl_len[s] != 0).map_or(0, |p| p + 1));
+        let hclen = 4.max(
+            CLEN_ORDER
+                .iter()
+                .rposition(|&s| cl_len[s] != 0)
+                .map_or(0, |p| p + 1),
+        );
         let mut bits = 5 + 5 + 4 + 3 * hclen as u64;
         for &(s, _) in &rle {
             bits += cl_len[s as usize] as u64
@@ -405,7 +485,15 @@ impl Plan {
                     _ => 0,
                 };
         }
-        Header { hlit, hdist, hclen, rle, cl_len, cl_code, bits }
+        Header {
+            hlit,
+            hdist,
+            hclen,
+            rle,
+            cl_len,
+            cl_code,
+            bits,
+        }
     }
 }
 
@@ -444,10 +532,16 @@ fn write_huffman(w: &mut BitWriter, tokens: &[Token], plan: &Plan, last: bool) {
     }
     for t in tokens {
         match *t {
-            Token::Lit(b) => w.put(plan.lit_code[b as usize] as u32, plan.lit_len[b as usize] as u32),
+            Token::Lit(b) => w.put(
+                plan.lit_code[b as usize] as u32,
+                plan.lit_len[b as usize] as u32,
+            ),
             Token::Match { len, dist } => {
                 let lc = length_code(len as usize);
-                w.put(plan.lit_code[257 + lc] as u32, plan.lit_len[257 + lc] as u32);
+                w.put(
+                    plan.lit_code[257 + lc] as u32,
+                    plan.lit_len[257 + lc] as u32,
+                );
                 w.put(len as u32 - LENGTH_BASE[lc] as u32, LENGTH_EXTRA[lc] as u32);
                 let dc = dist_code(dist as usize);
                 w.put(plan.dist_code[dc] as u32, plan.dist_len[dc] as u32);
@@ -491,7 +585,13 @@ impl Params {
             8 => (1024, 128, 64, MAX_MATCH, MAX_MATCH),
             _ => (4096, MAX_MATCH, MAX_MATCH, MAX_MATCH, MAX_MATCH),
         };
-        Params { chain, max_lazy, good, nice, insert_limit }
+        Params {
+            chain,
+            max_lazy,
+            good,
+            nice,
+            insert_limit,
+        }
     }
 }
 
@@ -510,7 +610,8 @@ fn match_len(a: &[u8], b: &[u8]) -> usize {
     let mut l = 0;
     let n = a.len();
     while l + 8 <= n {
-        let x = u64::from_le_bytes(a[l..l + 8].try_into().unwrap()) ^ u64::from_le_bytes(b[l..l + 8].try_into().unwrap());
+        let x = u64::from_le_bytes(a[l..l + 8].try_into().unwrap())
+            ^ u64::from_le_bytes(b[l..l + 8].try_into().unwrap());
         if x != 0 {
             return l + (x.trailing_zeros() / 8) as usize;
         }
@@ -642,7 +743,11 @@ impl<'a> Matcher<'a> {
             }
             if len < self.params.max_lazy && len < self.params.nice && p + 1 < n {
                 self.insert_upto(p + 1);
-                let chain = if len >= self.params.good { self.params.chain / 4 } else { self.params.chain };
+                let chain = if len >= self.params.good {
+                    self.params.chain / 4
+                } else {
+                    self.params.chain
+                };
                 let next = self.find(p + 1, chain.max(1));
                 if next.0 > len && gain(next.0, next.1) > gain(len, dist) {
                     tokens.push(Token::Lit(self.data[p]));
@@ -651,7 +756,10 @@ impl<'a> Matcher<'a> {
                     continue;
                 }
             }
-            tokens.push(Token::Match { len: len as u16, dist: dist as u16 });
+            tokens.push(Token::Match {
+                len: len as u16,
+                dist: dist as u16,
+            });
             self.pos += len;
             if len > self.params.insert_limit {
                 // Skip hashing the inside of a long match.

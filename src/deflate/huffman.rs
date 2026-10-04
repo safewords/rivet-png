@@ -73,7 +73,11 @@ impl Decoder {
             }
             code <<= 1;
         }
-        Ok(Decoder { fast, counts, symbols })
+        Ok(Decoder {
+            fast,
+            counts,
+            symbols,
+        })
     }
 
     /// Decodes one symbol from `bits` (the next bits of the stream, first
@@ -103,7 +107,9 @@ impl Decoder {
             first <<= 1;
             code <<= 1;
         }
-        Err(Error::Invalid("a Huffman code that the block's code does not define"))
+        Err(Error::Invalid(
+            "a Huffman code that the block's code does not define",
+        ))
     }
 }
 
@@ -147,8 +153,12 @@ pub fn codes(lengths: &[u8]) -> Vec<u16> {
 /// lone code is given one bit, as RFC 1951 asks, and a partner).
 pub fn lengths(freqs: &[u32], limit: usize) -> Vec<u8> {
     let mut out = vec![0u8; freqs.len()];
-    let mut leaves: Vec<(u64, usize)> =
-        freqs.iter().enumerate().filter(|&(_, &f)| f > 0).map(|(s, &f)| (f as u64, s)).collect();
+    let mut leaves: Vec<(u64, usize)> = freqs
+        .iter()
+        .enumerate()
+        .filter(|&(_, &f)| f > 0)
+        .map(|(s, &f)| (f as u64, s))
+        .collect();
     // Pad to two symbols so every tree has a root with two children.
     let mut s = 0;
     while leaves.len() < 2 && s < freqs.len() {
@@ -176,7 +186,11 @@ pub fn lengths(freqs: &[u32], limit: usize) -> Vec<u8> {
         Pack(usize, usize),
     }
     let mut levels: Vec<Vec<(u64, Item)>> = Vec::with_capacity(limit);
-    let base: Vec<(u64, Item)> = leaves.iter().enumerate().map(|(i, &(w, _))| (w, Item::Leaf(i))).collect();
+    let base: Vec<(u64, Item)> = leaves
+        .iter()
+        .enumerate()
+        .map(|(i, &(w, _))| (w, Item::Leaf(i)))
+        .collect();
     levels.push(base.clone());
     for _ in 1..limit {
         let prev = levels.last().unwrap();
@@ -225,7 +239,10 @@ mod tests {
     use super::*;
 
     fn kraft(l: &[u8]) -> f64 {
-        l.iter().filter(|&&x| x > 0).map(|&x| 0.5f64.powi(x as i32)).sum()
+        l.iter()
+            .filter(|&&x| x > 0)
+            .map(|&x| 0.5f64.powi(x as i32))
+            .sum()
     }
 
     #[test]

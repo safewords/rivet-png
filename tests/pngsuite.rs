@@ -22,17 +22,27 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 fn dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests").join("pngsuite")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("pngsuite")
 }
 
 /// (name, bytes) of every file in the manifest, hashes checked.
 fn suite() -> Vec<(String, Vec<u8>)> {
-    let manifest = std::fs::read_to_string(dir().join("SHA256SUMS")).expect("tests/pngsuite/SHA256SUMS");
+    let manifest =
+        std::fs::read_to_string(dir().join("SHA256SUMS")).expect("tests/pngsuite/SHA256SUMS");
     let mut out = Vec::new();
-    for line in manifest.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()) {
+    for line in manifest
+        .lines()
+        .filter(|l| !l.starts_with('#') && !l.trim().is_empty())
+    {
         let (hash, file) = line.split_once("  ").expect("manifest line");
         let bytes = std::fs::read(dir().join(file)).unwrap_or_else(|e| panic!("{file}: {e}"));
-        assert_eq!(hex(&sha256(&bytes)), hash, "{file}: SHA-256 differs from the manifest");
+        assert_eq!(
+            hex(&sha256(&bytes)),
+            hash,
+            "{file}: SHA-256 differs from the manifest"
+        );
         out.push((file.trim_end_matches(".png").to_string(), bytes));
     }
     out
@@ -51,8 +61,14 @@ fn decoded() -> BTreeMap<String, Png> {
 
 #[test]
 fn sha256_known_answers() {
-    assert_eq!(hex(&sha256(b"")), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-    assert_eq!(hex(&sha256(b"abc")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    assert_eq!(
+        hex(&sha256(b"")),
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    );
+    assert_eq!(
+        hex(&sha256(b"abc")),
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
 }
 
 #[test]
@@ -76,7 +92,10 @@ fn every_valid_image_decodes_and_every_corrupt_one_is_rejected() {
             good += 1;
         }
     }
-    eprintln!("PngSuite: {good}/{} valid images decoded, {rejected}/{bad} corrupt images rejected", all.len() - bad);
+    eprintln!(
+        "PngSuite: {good}/{} valid images decoded, {rejected}/{bad} corrupt images rejected",
+        all.len() - bad
+    );
     assert_eq!((good, bad, rejected), (162, 14, 14));
 }
 
@@ -84,7 +103,9 @@ fn every_valid_image_decodes_and_every_corrupt_one_is_rejected() {
 fn corrupt_files_fail_for_the_documented_reason() {
     let all: BTreeMap<_, _> = suite().into_iter().collect();
     let err = |n: &str| rpng::decode(&all[n]).unwrap_err().to_string();
-    for n in ["xs1n0g01", "xs2n0g01", "xs4n0g01", "xs7n0g01", "xcrn0g04", "xlfn0g04"] {
+    for n in [
+        "xs1n0g01", "xs2n0g01", "xs4n0g01", "xs7n0g01", "xcrn0g04", "xlfn0g04",
+    ] {
         assert!(err(n).contains("signature"), "{n}: {}", err(n));
     }
     assert!(err("xc1n0g08").contains("colour type 1"));
@@ -134,8 +155,8 @@ fn same_picture_in_different_encodings_decodes_identically() {
     let mut groups: Vec<Vec<String>> = Vec::new();
     // Interlaced and non-interlaced versions of the basic formats.
     for f in [
-        "0g01", "0g02", "0g04", "0g08", "0g16", "2c08", "2c16", "3p01", "3p02", "3p04", "3p08", "4a08", "4a16", "6a08",
-        "6a16",
+        "0g01", "0g02", "0g04", "0g08", "0g16", "2c08", "2c16", "3p01", "3p02", "3p04", "3p08",
+        "4a08", "4a16", "6a08", "6a16",
     ] {
         groups.push(vec![format!("basi{f}"), format!("basn{f}")]);
     }
@@ -165,8 +186,12 @@ fn same_picture_in_different_encodings_decodes_identically() {
     // Compression levels 0, 3, 6, 9.
     groups.push(g(&["z00n2c08", "z03n2c08", "z06n2c08", "z09n2c08"]));
     // Image data split over 1, 2, 4 IDAT chunks and one byte per chunk.
-    groups.push(g(&["basn0g16", "oi1n0g16", "oi2n0g16", "oi4n0g16", "oi9n0g16"]));
-    groups.push(g(&["basn2c16", "oi1n2c16", "oi2n2c16", "oi4n2c16", "oi9n2c16"]));
+    groups.push(g(&[
+        "basn0g16", "oi1n0g16", "oi2n0g16", "oi4n0g16", "oi9n0g16",
+    ]));
+    groups.push(g(&[
+        "basn2c16", "oi1n2c16", "oi2n2c16", "oi4n2c16", "oi9n2c16",
+    ]));
     // Background colour chunks do not change the pixels.
     groups.push(g(&["basn4a08", "bgai4a08", "bgbn4a08"]));
     groups.push(g(&["basn4a16", "bgai4a16", "bggn4a16"]));
@@ -178,13 +203,17 @@ fn same_picture_in_different_encodings_decodes_identically() {
     groups.push(g(&["basn3p04", "ch1n3p04"]));
     groups.push(g(&["basn3p08", "ch2n3p08"]));
     // tIME and text chunks.
-    groups.push(g(&["ct0n0g04", "ct1n0g04", "ctzn0g04", "cm0n0g04", "cm7n0g04", "cm9n0g04"]));
+    groups.push(g(&[
+        "ct0n0g04", "ct1n0g04", "ctzn0g04", "cm0n0g04", "cm7n0g04", "cm9n0g04",
+    ]));
     // The same colours as a palette and as truecolour: palette expansion
     // against direct samples.
     groups.push(g(&["cs5n2c08", "cs5n3p08"]));
     groups.push(g(&["cs8n2c08", "cs8n3p08"]));
     // Palette transparency with different backgrounds.
-    groups.push(g(&["tbbn3p08", "tbgn3p08", "tbwn3p08", "tbyn3p08", "tp1n3p08"]));
+    groups.push(g(&[
+        "tbbn3p08", "tbgn3p08", "tbwn3p08", "tbyn3p08", "tp1n3p08",
+    ]));
     groups.push(g(&["tbbn2c16", "tbgn2c16"]));
     let mut compared = 0;
     for group in &groups {
@@ -194,7 +223,10 @@ fn same_picture_in_different_encodings_decodes_identically() {
             compared += 1;
         }
     }
-    eprintln!("{} groups, {compared} images compared equal to their group's first", groups.len());
+    eprintln!(
+        "{} groups, {compared} images compared equal to their group's first",
+        groups.len()
+    );
 
     // The five filter files draw their filter number (in black) over the
     // same gradient: away from the digit the pixels agree.
@@ -207,7 +239,10 @@ fn same_picture_in_different_encodings_decodes_identically() {
                 if a != b {
                     differ += 1;
                     let black = |p: &[u16]| p[..3] == [0, 0, 0];
-                    assert!(black(a) || black(b), "f0{f}n{ct}: a non-glyph pixel differs");
+                    assert!(
+                        black(a) || black(b),
+                        "f0{f}n{ct}: a non-glyph pixel differs"
+                    );
                 }
             }
             assert!(differ < 120, "f0{f}n{ct}: {differ} pixels differ");
@@ -219,33 +254,72 @@ fn same_picture_in_different_encodings_decodes_identically() {
 fn metadata_matches_the_suite_descriptions() {
     let d = decoded();
     let m = |n: &str| &d[n].metadata;
-    for (g, gamma) in [("g03", 35000), ("g04", 45000), ("g05", 55000), ("g07", 70000), ("g10", 100000), ("g25", 250000)] {
+    for (g, gamma) in [
+        ("g03", 35000),
+        ("g04", 45000),
+        ("g05", 55000),
+        ("g07", 70000),
+        ("g10", 100000),
+        ("g25", 250000),
+    ] {
         for f in ["n0g16", "n2c08", "n3p04"] {
             assert_eq!(m(&format!("{g}{f}")).gamma, Some(gamma), "{g}{f}");
         }
     }
     assert_eq!(m("bgbn4a08").background, Some(Background::Gray(0)));
-    assert_eq!(m("bgwn6a08").background, Some(Background::Rgb(255, 255, 255)));
-    assert_eq!(m("bgyn6a16").background, Some(Background::Rgb(65535, 65535, 0)));
+    assert_eq!(
+        m("bgwn6a08").background,
+        Some(Background::Rgb(255, 255, 255))
+    );
+    assert_eq!(
+        m("bgyn6a16").background,
+        Some(Background::Rgb(65535, 65535, 0))
+    );
     assert_eq!(m("tbrn2c08").background, Some(Background::Rgb(255, 0, 0)));
     assert_eq!(m("tbgn2c16").background, Some(Background::Rgb(0, 65535, 0)));
     assert_eq!(m("tbwn0g16").background, Some(Background::Gray(65535)));
     let t = m("cm0n0g04").time.unwrap();
-    assert_eq!((t.year, t.month, t.day, t.hour, t.minute, t.second), (2000, 1, 1, 12, 34, 56));
+    assert_eq!(
+        (t.year, t.month, t.day, t.hour, t.minute, t.second),
+        (2000, 1, 1, 12, 34, 56)
+    );
     let t = m("cm7n0g04").time.unwrap();
-    assert_eq!((t.year, t.month, t.day, t.hour, t.minute, t.second), (1970, 1, 1, 0, 0, 0));
+    assert_eq!(
+        (t.year, t.month, t.day, t.hour, t.minute, t.second),
+        (1970, 1, 1, 0, 0, 0)
+    );
     let t = m("cm9n0g04").time.unwrap();
-    assert_eq!((t.year, t.month, t.day, t.hour, t.minute, t.second), (1999, 12, 31, 23, 59, 59));
+    assert_eq!(
+        (t.year, t.month, t.day, t.hour, t.minute, t.second),
+        (1999, 12, 31, 23, 59, 59)
+    );
     let p = |n: &str| m(n).physical.map(|p| (p.x, p.y, p.metre));
     assert_eq!(p("cdfn2c08"), Some((1, 4, false)));
     assert_eq!(p("cdhn2c08"), Some((4, 1, false)));
     assert_eq!(p("cdsn2c08"), Some((1, 1, false)));
     assert_eq!(p("cdun2c08"), Some((1000, 1000, true)));
-    assert_eq!(m("cs3n2c16").significant_bits.as_deref(), Some(&[13, 13, 13][..]));
-    assert_eq!(m("cs5n2c08").significant_bits.as_deref(), Some(&[5, 5, 5][..]));
-    assert_eq!(m("cs3n3p08").significant_bits.as_deref(), Some(&[3, 3, 3][..]));
+    assert_eq!(
+        m("cs3n2c16").significant_bits.as_deref(),
+        Some(&[13, 13, 13][..])
+    );
+    assert_eq!(
+        m("cs5n2c08").significant_bits.as_deref(),
+        Some(&[5, 5, 5][..])
+    );
+    assert_eq!(
+        m("cs3n3p08").significant_bits.as_deref(),
+        Some(&[3, 3, 3][..])
+    );
     let c = m("ccwn2c08").chromaticities.unwrap();
-    assert_eq!((c.white, c.red, c.green, c.blue), ((31270, 32900), (64000, 33000), (30000, 60000), (15000, 6000)));
+    assert_eq!(
+        (c.white, c.red, c.green, c.blue),
+        (
+            (31270, 32900),
+            (64000, 33000),
+            (30000, 60000),
+            (15000, 6000)
+        )
+    );
     // Exif: a TIFF header, big-endian.
     assert_eq!(&m("exif2c08").exif.as_ref().unwrap()[..4], b"MM\0*");
     // Text: none; six tEXt; tEXt and zTXt; iTXt in five languages.
@@ -256,13 +330,28 @@ fn metadata_matches_the_suite_descriptions() {
     assert_eq!(m("ct1n0g04").text[0].text, "PngSuite");
     let z = &m("ctzn0g04").text;
     assert!(z.iter().any(|t| t.kind == TextKind::Compressed));
-    assert_eq!(z.iter().map(|t| &t.text).collect::<Vec<_>>(), m("ct1n0g04").text.iter().map(|t| &t.text).collect::<Vec<_>>());
-    for (f, lang, title) in
-        [("cten", "en", "Title"), ("ctfn", "fi", "Otsikko"), ("ctgn", "el", "Τίτλος"), ("cthn", "hi", "शीर्षक"), ("ctjn", "ja", "タイトル")]
-    {
+    assert_eq!(
+        z.iter().map(|t| &t.text).collect::<Vec<_>>(),
+        m("ct1n0g04")
+            .text
+            .iter()
+            .map(|t| &t.text)
+            .collect::<Vec<_>>()
+    );
+    for (f, lang, title) in [
+        ("cten", "en", "Title"),
+        ("ctfn", "fi", "Otsikko"),
+        ("ctgn", "el", "Τίτλος"),
+        ("cthn", "hi", "शीर्षक"),
+        ("ctjn", "ja", "タイトル"),
+    ] {
         let t = &m(&format!("{f}0g04")).text;
         assert_eq!(t.len(), 6, "{f}");
-        assert!(t.iter().all(|t| t.kind == TextKind::International { compressed: false } && t.language == lang));
+        assert!(
+            t.iter()
+                .all(|t| t.kind == TextKind::International { compressed: false }
+                    && t.language == lang)
+        );
         assert_eq!(t[0].translated_keyword, title, "{f}");
         assert_eq!(t[0].text, "PngSuite");
     }
@@ -284,13 +373,24 @@ fn transparency_and_significant_bits() {
         assert_eq!(alphas(n), vec![65535], "{n}");
         assert!(d[n].image.transparency.is_none());
     }
-    for n in ["tbbn0g04", "tbbn2c16", "tbbn3p08", "tbrn2c08", "tbwn0g16", "tp1n3p08"] {
+    for n in [
+        "tbbn0g04", "tbbn2c16", "tbbn3p08", "tbrn2c08", "tbwn0g16", "tp1n3p08",
+    ] {
         assert_eq!(alphas(n), vec![0, 65535], "{n}");
     }
-    assert_eq!(d["tbbn0g04"].image.transparency, Some(Transparency::Gray(15)));
-    assert_eq!(d["tbrn2c08"].image.transparency, Some(Transparency::Rgb(255, 255, 255)));
+    assert_eq!(
+        d["tbbn0g04"].image.transparency,
+        Some(Transparency::Gray(15))
+    );
+    assert_eq!(
+        d["tbrn2c08"].image.transparency,
+        Some(Transparency::Rgb(255, 255, 255))
+    );
     // tm3n3p02: palette alpha 0, 85, 170 and opaque.
-    assert_eq!(d["tm3n3p02"].image.transparency, Some(Transparency::Palette(vec![0, 85, 170])));
+    assert_eq!(
+        d["tm3n3p02"].image.transparency,
+        Some(Transparency::Palette(vec![0, 85, 170]))
+    );
     assert_eq!(alphas("tm3n3p02"), vec![0, 85 * 257, 170 * 257, 65535]);
     // sBIT n: the samples are n-bit values scaled to the full depth (by bit
     // replication or by multiplication with rounding; the suite uses the
@@ -311,7 +411,10 @@ fn transparency_and_significant_bits() {
                     let replicated = r >> (filled - depth);
                     let multiplied = ((s as u64 * ((1u64 << depth) - 1) * 2 + ((1u64 << sig) - 1))
                         / (2 * ((1u64 << sig) - 1))) as u32;
-                    assert!(v == replicated || v == multiplied, "{n} ({x},{y}) channel {c}: {v}");
+                    assert!(
+                        v == replicated || v == multiplied,
+                        "{n} ({x},{y}) channel {c}: {v}"
+                    );
                 }
             }
         }
@@ -357,9 +460,21 @@ fn uncompressed_file_matches_a_minimal_independent_decode() {
         let f = raw[y * (stride + 1)];
         for x in 0..stride {
             let v = raw[y * (stride + 1) + 1 + x] as i32;
-            let a = if x >= bpp { img[y * stride + x - bpp] as i32 } else { 0 };
-            let b = if y > 0 { img[(y - 1) * stride + x] as i32 } else { 0 };
-            let c = if x >= bpp && y > 0 { img[(y - 1) * stride + x - bpp] as i32 } else { 0 };
+            let a = if x >= bpp {
+                img[y * stride + x - bpp] as i32
+            } else {
+                0
+            };
+            let b = if y > 0 {
+                img[(y - 1) * stride + x] as i32
+            } else {
+                0
+            };
+            let c = if x >= bpp && y > 0 {
+                img[(y - 1) * stride + x - bpp] as i32
+            } else {
+                0
+            };
             let pred = match f {
                 0 => 0,
                 1 => a,
@@ -401,9 +516,15 @@ fn reencoding_with_every_filter_and_interlace_round_trips() {
                 enc.filter = filter;
                 enc.interlaced = interlaced;
                 enc.metadata = png.metadata.clone();
-                let bytes = enc.encode(&png.image).unwrap_or_else(|e| panic!("{name}: {e}"));
-                let back = rpng::decode(&bytes).unwrap_or_else(|e| panic!("{name} {filter:?}: {e}"));
-                assert!(back.image == png.image, "{name} {filter:?} interlaced={interlaced}: pixels differ");
+                let bytes = enc
+                    .encode(&png.image)
+                    .unwrap_or_else(|e| panic!("{name}: {e}"));
+                let back =
+                    rpng::decode(&bytes).unwrap_or_else(|e| panic!("{name} {filter:?}: {e}"));
+                assert!(
+                    back.image == png.image,
+                    "{name} {filter:?} interlaced={interlaced}: pixels differ"
+                );
                 assert_eq!(back.metadata, png.metadata, "{name}: metadata");
                 runs += 1;
             }
@@ -416,7 +537,12 @@ fn reencoding_with_every_filter_and_interlace_round_trips() {
 fn every_truncation_and_bit_flip_of_a_valid_file_fails_cleanly() {
     let all = suite();
     let mut cases = 0;
-    for (name, bytes) in all.iter().filter(|(n, _)| ["basi3p02", "basn6a16", "ctzn0g04", "s35i3p04", "tbwn3p08", "z09n2c08"].contains(&n.as_str())) {
+    for (name, bytes) in all.iter().filter(|(n, _)| {
+        [
+            "basi3p02", "basn6a16", "ctzn0g04", "s35i3p04", "tbwn3p08", "z09n2c08",
+        ]
+        .contains(&n.as_str())
+    }) {
         for cut in 0..bytes.len() {
             assert!(rpng::decode(&bytes[..cut]).is_err(), "{name} cut at {cut}");
             cases += 1;

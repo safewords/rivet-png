@@ -2,15 +2,30 @@
 //! and the full image.
 
 /// (x start, y start, x step, y step) of the seven passes.
-pub(crate) const ADAM7: [(u32, u32, u32, u32); 7] =
-    [(0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4), (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2)];
+pub(crate) const ADAM7: [(u32, u32, u32, u32); 7] = [
+    (0, 0, 8, 8),
+    (4, 0, 8, 8),
+    (0, 4, 4, 8),
+    (2, 0, 4, 4),
+    (0, 2, 2, 4),
+    (1, 0, 2, 2),
+    (0, 1, 1, 2),
+];
 
 /// The size of pass `p` (0-based) of a `width` x `height` image; either may
 /// be zero, in which case the pass is empty (and has no filter bytes).
 pub(crate) fn pass_size(p: usize, width: u32, height: u32) -> (u32, u32) {
     let (x0, y0, dx, dy) = ADAM7[p];
-    let w = if width > x0 { (width - x0).div_ceil(dx) } else { 0 };
-    let h = if height > y0 { (height - y0).div_ceil(dy) } else { 0 };
+    let w = if width > x0 {
+        (width - x0).div_ceil(dx)
+    } else {
+        0
+    };
+    let h = if height > y0 {
+        (height - y0).div_ceil(dy)
+    } else {
+        0
+    };
     (w, h)
 }
 
@@ -34,7 +49,16 @@ pub(crate) fn copy_pixel(src: &[u8], sx: usize, dst: &mut [u8], dx: usize, bpp: 
 #[allow(clippy::too_many_arguments)]
 /// Places the pixels of pass `p` (rows of `pass_row` bytes in `pass`) into
 /// the image `out` (rows of `row` bytes).
-pub(crate) fn scatter(p: usize, pass: &[u8], pass_row: usize, width: u32, height: u32, bpp: usize, out: &mut [u8], row: usize) {
+pub(crate) fn scatter(
+    p: usize,
+    pass: &[u8],
+    pass_row: usize,
+    width: u32,
+    height: u32,
+    bpp: usize,
+    out: &mut [u8],
+    row: usize,
+) {
     let (pw, ph) = pass_size(p, width, height);
     let (x0, y0, dx, dy) = ADAM7[p];
     for j in 0..ph as usize {
@@ -49,7 +73,14 @@ pub(crate) fn scatter(p: usize, pass: &[u8], pass_row: usize, width: u32, height
 
 /// Extracts the pixels of pass `p` from the image `img` (rows of `row`
 /// bytes) as packed rows of the pass's width.
-pub(crate) fn gather(p: usize, img: &[u8], row: usize, width: u32, height: u32, bpp: usize) -> (Vec<u8>, usize) {
+pub(crate) fn gather(
+    p: usize,
+    img: &[u8],
+    row: usize,
+    width: u32,
+    height: u32,
+    bpp: usize,
+) -> (Vec<u8>, usize) {
     let (pw, ph) = pass_size(p, width, height);
     let pass_row = (pw as usize * bpp).div_ceil(8);
     let mut out = vec![0u8; pass_row * ph as usize];

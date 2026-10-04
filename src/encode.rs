@@ -47,7 +47,8 @@ struct Writer {
 
 impl Writer {
     fn chunk(&mut self, kind: &[u8; 4], data: &[u8]) {
-        self.out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+        self.out
+            .extend_from_slice(&(data.len() as u32).to_be_bytes());
         self.out.extend_from_slice(kind);
         self.out.extend_from_slice(data);
         let mut c = Crc32::new();
@@ -66,7 +67,9 @@ fn latin1(s: &str, what: &str) -> Result<Vec<u8>> {
 fn keyword(s: &str) -> Result<Vec<u8>> {
     let k = latin1(s, "keyword")?;
     if k.is_empty() || k.len() > 79 || k.contains(&0) {
-        return Err(config(format!("keyword {s:?} must be 1-79 Latin-1 characters without NUL")));
+        return Err(config(format!(
+            "keyword {s:?} must be 1-79 Latin-1 characters without NUL"
+        )));
     }
     Ok(k)
 }
@@ -74,7 +77,13 @@ fn keyword(s: &str) -> Result<Vec<u8>> {
 impl Encoder {
     /// The default settings with compression level `level`.
     pub fn with_level(level: u8) -> Encoder {
-        Encoder { compression: deflate::Options { level, ..Default::default() }, ..Default::default() }
+        Encoder {
+            compression: deflate::Options {
+                level,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
     }
 
     /// Encodes a still image.
@@ -93,15 +102,27 @@ impl Encoder {
     /// shown by decoders that do not animate, sets the canvas size, and is
     /// not part of the animation. Every frame must have the static image's
     /// colour type, bit depth, palette and transparency, and fit the canvas.
-    pub fn encode_animation(&self, animation: &Animation, static_image: Option<&Image>) -> Result<Vec<u8>> {
+    pub fn encode_animation(
+        &self,
+        animation: &Animation,
+        static_image: Option<&Image>,
+    ) -> Result<Vec<u8>> {
         if animation.frames.is_empty() {
             return Err(config("an animation with no frames"));
         }
         let base = match (animation.default_image_is_first_frame, static_image) {
             (true, None) => &animation.frames[0].image,
             (false, Some(img)) => img,
-            (true, Some(_)) => return Err(config("a static image given, but the first frame is the static image")),
-            (false, None) => return Err(config("no static image given, and the first frame is not one")),
+            (true, Some(_)) => {
+                return Err(config(
+                    "a static image given, but the first frame is the static image",
+                ));
+            }
+            (false, None) => {
+                return Err(config(
+                    "no static image given, and the first frame is not one",
+                ));
+            }
         };
         base.validate()?;
         for (i, f) in animation.frames.iter().enumerate() {
@@ -112,19 +133,25 @@ impl Encoder {
                 || img.palette != base.palette
                 || img.transparency != base.transparency
             {
-                return Err(config(format!("frame {i}'s format differs from the static image's")));
+                return Err(config(format!(
+                    "frame {i}'s format differs from the static image's"
+                )));
             }
             if (img.width, img.height) != (c.width, c.height)
                 || c.x_offset as u64 + c.width as u64 > base.width as u64
                 || c.y_offset as u64 + c.height as u64 > base.height as u64
             {
-                return Err(config(format!("frame {i} does not fit the canvas or its fcTL")));
+                return Err(config(format!(
+                    "frame {i} does not fit the canvas or its fcTL"
+                )));
             }
             if i == 0
                 && animation.default_image_is_first_frame
                 && (c.x_offset, c.y_offset, c.width, c.height) != (0, 0, base.width, base.height)
             {
-                return Err(config("the first frame is the static image but does not cover the canvas"));
+                return Err(config(
+                    "the first frame is the static image but does not cover the canvas",
+                ));
             }
         }
         let mut w = self.start(base)?;
@@ -140,7 +167,11 @@ impl Encoder {
         }
         let z = self.image_data(base);
         self.idat(&mut w, &z);
-        let size = if self.chunk_size == 0 { 1 << 20 } else { self.chunk_size };
+        let size = if self.chunk_size == 0 {
+            1 << 20
+        } else {
+            self.chunk_size
+        };
         for f in rest {
             fctl(&mut w, &mut seq, &f.control);
             let z = self.image_data(&f.image);
@@ -157,7 +188,11 @@ impl Encoder {
     }
 
     fn idat(&self, w: &mut Writer, z: &[u8]) {
-        let size = if self.chunk_size == 0 { 1 << 20 } else { self.chunk_size };
+        let size = if self.chunk_size == 0 {
+            1 << 20
+        } else {
+            self.chunk_size
+        };
         for piece in z.chunks(size) {
             w.chunk(b"IDAT", piece);
         }
@@ -173,10 +208,26 @@ impl Encoder {
         if self.interlaced {
             for p in 0..7 {
                 let (pass, prow) = gather(p, &image.data, row, image.width, image.height, bits);
-                filter_rows(&pass, prow, bpp, self.filter, low, self.compression.threads, &mut filtered);
+                filter_rows(
+                    &pass,
+                    prow,
+                    bpp,
+                    self.filter,
+                    low,
+                    self.compression.threads,
+                    &mut filtered,
+                );
             }
         } else {
-            filter_rows(&image.data, row, bpp, self.filter, low, self.compression.threads, &mut filtered);
+            filter_rows(
+                &image.data,
+                row,
+                bpp,
+                self.filter,
+                low,
+                self.compression.threads,
+                &mut filtered,
+            );
         }
         deflate::zlib_compress_with(&filtered, &self.compression)
     }
@@ -184,17 +235,33 @@ impl Encoder {
     /// Signature, IHDR and every chunk that precedes the image data.
     fn start(&self, image: &Image) -> Result<Writer> {
         let m = &self.metadata;
-        let mut w = Writer { out: SIGNATURE.to_vec() };
+        let mut w = Writer {
+            out: SIGNATURE.to_vec(),
+        };
         let mut ihdr = Vec::with_capacity(13);
         ihdr.extend_from_slice(&image.width.to_be_bytes());
         ihdr.extend_from_slice(&image.height.to_be_bytes());
-        ihdr.extend_from_slice(&[image.bit_depth, image.color_type.code(), 0, 0, self.interlaced as u8]);
+        ihdr.extend_from_slice(&[
+            image.bit_depth,
+            image.color_type.code(),
+            0,
+            0,
+            self.interlaced as u8,
+        ]);
         w.chunk(b"IHDR", &ihdr);
         let level = self.compression.level;
 
         // Before PLTE: colour space information, sBIT, HDR metadata.
         if let Some(c) = &m.cicp {
-            w.chunk(b"cICP", &[c.color_primaries, c.transfer_function, c.matrix_coefficients, c.full_range as u8]);
+            w.chunk(
+                b"cICP",
+                &[
+                    c.color_primaries,
+                    c.transfer_function,
+                    c.matrix_coefficients,
+                    c.full_range as u8,
+                ],
+            );
         }
         if let Some(icc) = &m.icc_profile {
             let mut d = keyword(&icc.name)?;
@@ -235,7 +302,11 @@ impl Encoder {
             w.chunk(b"cLLI", &d);
         }
         if let Some(s) = &m.significant_bits {
-            let n = if image.color_type == ColorType::Indexed { 3 } else { image.color_type.channels() };
+            let n = if image.color_type == ColorType::Indexed {
+                3
+            } else {
+                image.color_type.channels()
+            };
             if s.len() != n {
                 return Err(config(format!("sBIT needs {n} values")));
             }
@@ -262,7 +333,9 @@ impl Encoder {
         if let Some(b) = &m.background {
             let d = match (*b, image.color_type) {
                 (Background::Palette(i), ColorType::Indexed) => vec![i],
-                (Background::Gray(g), ColorType::Grayscale | ColorType::GrayscaleAlpha) => g.to_be_bytes().to_vec(),
+                (Background::Gray(g), ColorType::Grayscale | ColorType::GrayscaleAlpha) => {
+                    g.to_be_bytes().to_vec()
+                }
                 (Background::Rgb(r, g, b), ColorType::Rgb | ColorType::Rgba) => {
                     [r.to_be_bytes(), g.to_be_bytes(), b.to_be_bytes()].concat()
                 }
@@ -294,7 +367,10 @@ impl Encoder {
                 }
                 TextKind::Compressed => {
                     d.push(0);
-                    d.extend_from_slice(&deflate::zlib_compress(&latin1(&t.text, "zTXt text")?, level.max(1)));
+                    d.extend_from_slice(&deflate::zlib_compress(
+                        &latin1(&t.text, "zTXt text")?,
+                        level.max(1),
+                    ));
                     b"zTXt"
                 }
                 TextKind::International { compressed } => {
@@ -304,7 +380,10 @@ impl Encoder {
                     d.extend_from_slice(t.translated_keyword.as_bytes());
                     d.push(0);
                     if compressed {
-                        d.extend_from_slice(&deflate::zlib_compress(t.text.as_bytes(), level.max(1)));
+                        d.extend_from_slice(&deflate::zlib_compress(
+                            t.text.as_bytes(),
+                            level.max(1),
+                        ));
                     } else {
                         d.extend_from_slice(t.text.as_bytes());
                     }
@@ -315,7 +394,9 @@ impl Encoder {
         }
         for u in &m.unknown {
             if !u.kind.iter().all(|c| c.is_ascii_alphabetic()) || u.kind[0].is_ascii_uppercase() {
-                return Err(config("an unknown chunk must have an ancillary (lower-case first letter) type"));
+                return Err(config(
+                    "an unknown chunk must have an ancillary (lower-case first letter) type",
+                ));
             }
             w.chunk(&u.kind, &u.data);
         }

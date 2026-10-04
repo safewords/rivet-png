@@ -18,7 +18,13 @@ pub enum Filter {
 
 impl Filter {
     /// All five, in type order.
-    pub const ALL: [Filter; 5] = [Filter::None, Filter::Sub, Filter::Up, Filter::Average, Filter::Paeth];
+    pub const ALL: [Filter; 5] = [
+        Filter::None,
+        Filter::Sub,
+        Filter::Up,
+        Filter::Average,
+        Filter::Paeth,
+    ];
 
     /// The filter type byte.
     pub fn code(self) -> u8 {
@@ -86,7 +92,13 @@ pub(crate) fn unfilter(filter: Filter, row: &mut [u8], prev: &[u8], bpp: usize) 
 /// The portable reverse filter (type `kind`) from byte `start` on; the
 /// bytes before `start` are already reconstructed. The vector kernels
 /// finish rows with this.
-pub(crate) fn unfilter_scalar_from(kind: u8, row: &mut [u8], prev: &[u8], bpp: usize, start: usize) {
+pub(crate) fn unfilter_scalar_from(
+    kind: u8,
+    row: &mut [u8],
+    prev: &[u8],
+    bpp: usize,
+    start: usize,
+) {
     let n = row.len();
     let head = bpp.min(n);
     match kind {
@@ -146,7 +158,12 @@ pub(crate) fn apply(filter: Filter, row: &[u8], prev: &[u8], bpp: usize, out: &m
             for i in 0..k {
                 out[i] = row[i].wrapping_sub(prev[i] / 2);
             }
-            for (((o, &x), &a), &b) in out[k..].iter_mut().zip(&row[k..]).zip(&row[..n - k]).zip(&prev[k..]) {
+            for (((o, &x), &a), &b) in out[k..]
+                .iter_mut()
+                .zip(&row[k..])
+                .zip(&row[..n - k])
+                .zip(&prev[k..])
+            {
                 *o = x.wrapping_sub(((a as u16 + b as u16) >> 1) as u8);
             }
         }
@@ -154,8 +171,12 @@ pub(crate) fn apply(filter: Filter, row: &[u8], prev: &[u8], bpp: usize, out: &m
             for i in 0..k {
                 out[i] = row[i].wrapping_sub(prev[i]);
             }
-            for ((((o, &x), &a), &b), &c) in
-                out[k..].iter_mut().zip(&row[k..]).zip(&row[..n - k]).zip(&prev[k..]).zip(&prev[..n - k])
+            for ((((o, &x), &a), &b), &c) in out[k..]
+                .iter_mut()
+                .zip(&row[k..])
+                .zip(&row[..n - k])
+                .zip(&prev[k..])
+                .zip(&prev[..n - k])
             {
                 *o = x.wrapping_sub(paeth_select(a, b, c));
             }
@@ -177,7 +198,14 @@ fn paeth_select(a: u8, b: u8, c: u8) -> u8 {
 #[inline(always)]
 fn cost(bytes: &[u8]) -> u64 {
     // Summed in 32-bit lanes, a piece at a time, so that it vectorises.
-    bytes.chunks(1 << 16).map(|p| p.iter().map(|&b| (b as i8).unsigned_abs() as u32).sum::<u32>() as u64).sum()
+    bytes
+        .chunks(1 << 16)
+        .map(|p| {
+            p.iter()
+                .map(|&b| (b as i8).unsigned_abs() as u32)
+                .sum::<u32>() as u64
+        })
+        .sum()
 }
 
 /// Filters one row into `best` (with `trial` as scratch) and returns the
@@ -235,8 +263,20 @@ fn filter_range(
         let mut best = vec![0u8; row_len];
         for y in range {
             let row = &rows[y * row_len..(y + 1) * row_len];
-            let prev = if y == 0 { &zero[..] } else { &rows[(y - 1) * row_len..y * row_len] };
-            let choice = filter_row(row, prev, bpp, strategy, low_depth_or_indexed, &mut trial, &mut best);
+            let prev = if y == 0 {
+                &zero[..]
+            } else {
+                &rows[(y - 1) * row_len..y * row_len]
+            };
+            let choice = filter_row(
+                row,
+                prev,
+                bpp,
+                strategy,
+                low_depth_or_indexed,
+                &mut trial,
+                &mut best,
+            );
             out.push(choice.code());
             out.extend_from_slice(&best);
         }
@@ -268,13 +308,29 @@ pub(crate) fn filter_rows(
     let per_task = (PARALLEL_BYTES / row_len).max(1);
     let tasks = height.div_ceil(per_task);
     if tasks <= 1 {
-        filter_range(rows, row_len, bpp, strategy, low_depth_or_indexed, 0..height, out);
+        filter_range(
+            rows,
+            row_len,
+            bpp,
+            strategy,
+            low_depth_or_indexed,
+            0..height,
+            out,
+        );
         return;
     }
     let parts = crate::par::map(tasks, threads, |t| {
         let range = t * per_task..((t + 1) * per_task).min(height);
         let mut part = Vec::with_capacity(range.len() * (row_len + 1));
-        filter_range(rows, row_len, bpp, strategy, low_depth_or_indexed, range, &mut part);
+        filter_range(
+            rows,
+            row_len,
+            bpp,
+            strategy,
+            low_depth_or_indexed,
+            range,
+            &mut part,
+        );
         part
     });
     for p in parts {
@@ -328,7 +384,11 @@ mod tests {
                             Filter::Average => ((a as u16 + prev[i] as u16) / 2) as u8,
                             Filter::Paeth => paeth(a, prev[i], c),
                         };
-                        assert_eq!(out[i], row[i].wrapping_sub(pred), "{f:?} bpp {bpp} len {len} at {i}");
+                        assert_eq!(
+                            out[i],
+                            row[i].wrapping_sub(pred),
+                            "{f:?} bpp {bpp} len {len} at {i}"
+                        );
                     }
                 }
             }

@@ -20,7 +20,9 @@ pub const DIST_EXTRA: [u8; 30] = [
     13,
 ];
 /// The order in which a dynamic block sends its code length code lengths.
-pub const CLEN_ORDER: [usize; 19] = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+pub const CLEN_ORDER: [usize; 19] = [
+    16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+];
 
 /// Code lengths of the fixed literal/length code (288 symbols).
 pub fn fixed_litlen_lengths() -> [u8; 288] {
@@ -97,7 +99,11 @@ pub fn length_code(len: usize) -> usize {
 /// The distance code for a distance 1..=32768.
 #[inline]
 pub fn dist_code(dist: usize) -> usize {
-    if dist <= 256 { DIST_SMALL[dist] as usize } else { DIST_LARGE[(dist - 1) >> 7] as usize }
+    if dist <= 256 {
+        DIST_SMALL[dist] as usize
+    } else {
+        DIST_LARGE[(dist - 1) >> 7] as usize
+    }
 }
 
 #[cfg(test)]
@@ -109,7 +115,10 @@ mod tests {
         for len in 3..=258usize {
             let c = length_code(len);
             let base = LENGTH_BASE[c] as usize;
-            assert!(len >= base && len - base < (1 << LENGTH_EXTRA[c]), "length {len}");
+            assert!(
+                len >= base && len - base < (1 << LENGTH_EXTRA[c]),
+                "length {len}"
+            );
         }
         assert_eq!(length_code(258), 28);
         assert_eq!(length_code(257), 27);

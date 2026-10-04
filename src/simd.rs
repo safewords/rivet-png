@@ -20,7 +20,9 @@
 #[inline]
 pub(crate) fn crc32_update(crc: u32, data: &[u8], table: impl Fn(u32, &[u8]) -> u32) -> u32 {
     #[cfg(all(target_arch = "x86_64", not(feature = "force-scalar")))]
-    if data.len() >= 64 && std::arch::is_x86_feature_detected!("pclmulqdq") && std::arch::is_x86_feature_detected!("sse4.1")
+    if data.len() >= 64
+        && std::arch::is_x86_feature_detected!("pclmulqdq")
+        && std::arch::is_x86_feature_detected!("sse4.1")
     {
         // SAFETY: the features the function is compiled for were detected.
         let (crc, rest) = unsafe { x86::crc32_fold(crc, data, &table) };
@@ -111,16 +113,28 @@ mod x86 {
     #[inline]
     #[target_feature(enable = "pclmulqdq,sse2")]
     fn fold(x: __m128i, k: __m128i) -> __m128i {
-        _mm_xor_si128(_mm_clmulepi64_si128::<0x00>(x, k), _mm_clmulepi64_si128::<0x11>(x, k))
+        _mm_xor_si128(
+            _mm_clmulepi64_si128::<0x00>(x, k),
+            _mm_clmulepi64_si128::<0x11>(x, k),
+        )
     }
 
     /// Folds `data` down to one 128-bit value and returns the register for
     /// it (through `table`) and the bytes left over (fewer than 16).
     #[target_feature(enable = "pclmulqdq,sse4.1")]
-    pub(super) fn crc32_fold<'a>(crc: u32, data: &'a [u8], table: &impl Fn(u32, &[u8]) -> u32) -> (u32, &'a [u8]) {
+    pub(super) fn crc32_fold<'a>(
+        crc: u32,
+        data: &'a [u8],
+        table: &impl Fn(u32, &[u8]) -> u32,
+    ) -> (u32, &'a [u8]) {
         let k512 = _mm_set_epi64x(K512.1 as i64, K512.0 as i64);
         let k128 = _mm_set_epi64x(K128.1 as i64, K128.0 as i64);
-        let mut x = [load(&data[0..]), load(&data[16..]), load(&data[32..]), load(&data[48..])];
+        let mut x = [
+            load(&data[0..]),
+            load(&data[16..]),
+            load(&data[32..]),
+            load(&data[48..]),
+        ];
         x[0] = _mm_xor_si128(x[0], _mm_cvtsi32_si128(crc as i32));
         let mut rest = &data[64..];
         while rest.len() >= 64 {
@@ -152,8 +166,8 @@ mod x86 {
         let mut b = adler >> 16;
         // Weights 32, 31, ..., 1 for the bytes of a vector.
         let weights = _mm256_setr_epi8(
-            32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4,
-            3, 2, 1,
+            32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11,
+            10, 9, 8, 7, 6, 5, 4, 3, 2, 1,
         );
         let ones = _mm256_set1_epi16(1);
         let zero = _mm256_setzero_si256();
@@ -168,7 +182,10 @@ mod x86 {
                 let d = unsafe { _mm256_loadu_si256(v.as_ptr().cast()) };
                 vprev = _mm256_add_epi32(vprev, va);
                 va = _mm256_add_epi64(va, _mm256_sad_epu8(d, zero));
-                vb = _mm256_add_epi32(vb, _mm256_madd_epi16(_mm256_maddubs_epi16(d, weights), ones));
+                vb = _mm256_add_epi32(
+                    vb,
+                    _mm256_madd_epi16(_mm256_maddubs_epi16(d, weights), ones),
+                );
             }
             let sum32 = |v: __m256i| -> u64 {
                 let mut l = [0u32; 8];
@@ -215,9 +232,21 @@ mod arm {
     }
 
     #[target_feature(enable = "neon,aes")]
-    pub(super) fn crc32_fold<'a>(crc: u32, data: &'a [u8], table: &impl Fn(u32, &[u8]) -> u32) -> (u32, &'a [u8]) {
-        let mut x = [load(&data[0..]), load(&data[16..]), load(&data[32..]), load(&data[48..])];
-        x[0] = veorq_u8(x[0], vreinterpretq_u8_u32(vsetq_lane_u32::<0>(crc, vdupq_n_u32(0))));
+    pub(super) fn crc32_fold<'a>(
+        crc: u32,
+        data: &'a [u8],
+        table: &impl Fn(u32, &[u8]) -> u32,
+    ) -> (u32, &'a [u8]) {
+        let mut x = [
+            load(&data[0..]),
+            load(&data[16..]),
+            load(&data[32..]),
+            load(&data[48..]),
+        ];
+        x[0] = veorq_u8(
+            x[0],
+            vreinterpretq_u8_u32(vsetq_lane_u32::<0>(crc, vdupq_n_u32(0))),
+        );
         let mut rest = &data[64..];
         while rest.len() >= 64 {
             for (i, xi) in x.iter_mut().enumerate() {
@@ -264,7 +293,8 @@ mod arm {
                 vb = vpadalq_u16(vb, lo);
                 vb = vpadalq_u16(vb, hi);
             }
-            let bb = b as u64 + n * a as u64 + 16 * vaddvq_u32(vprev) as u64 + vaddvq_u32(vb) as u64;
+            let bb =
+                b as u64 + n * a as u64 + 16 * vaddvq_u32(vprev) as u64 + vaddvq_u32(vb) as u64;
             a = ((a as u64 + vaddvq_u32(va) as u64) % 65521) as u32;
             b = (bb % 65521) as u32;
         }
@@ -290,7 +320,10 @@ pub(crate) fn unfilter(kind: u8, row: &mut [u8], prev: &[u8], bpp: usize) -> boo
     let usable = row.len() >= 16 && std::arch::is_x86_feature_detected!("sse4.1");
     #[cfg(all(target_arch = "aarch64", not(feature = "force-scalar")))]
     let usable = row.len() >= 16;
-    #[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(feature = "force-scalar")))]
+    #[cfg(all(
+        any(target_arch = "x86_64", target_arch = "aarch64"),
+        not(feature = "force-scalar")
+    ))]
     if usable {
         // SAFETY: SSE4.1 was detected; NEON is part of the AArch64
         // baseline.
@@ -332,12 +365,19 @@ mod lanes {
     #[target_feature(enable = "sse4.1")]
     pub(super) fn load8(b: &[u8]) -> V {
         let v = u64::from_le_bytes(b[..8].try_into().unwrap());
-        V(_mm_unpacklo_epi8(_mm_cvtsi64_si128(v as i64), _mm_setzero_si128()))
+        V(_mm_unpacklo_epi8(
+            _mm_cvtsi64_si128(v as i64),
+            _mm_setzero_si128(),
+        ))
     }
     #[inline]
     #[target_feature(enable = "sse4.1")]
     pub(super) fn bytes(v: V) -> [u8; 8] {
-        (_mm_cvtsi128_si64(_mm_packus_epi16(_mm_and_si128(v.0, _mm_set1_epi16(0xFF)), v.0)) as u64).to_le_bytes()
+        (_mm_cvtsi128_si64(_mm_packus_epi16(
+            _mm_and_si128(v.0, _mm_set1_epi16(0xFF)),
+            v.0,
+        )) as u64)
+            .to_le_bytes()
     }
     #[inline]
     #[target_feature(enable = "sse4.1")]
@@ -415,7 +455,10 @@ mod lanes {
 /// row above, so the loop stops eight bytes short of the end; the rest is
 /// finished by the portable code, which reads the reconstructed pixels
 /// before it.
-#[cfg(all(any(target_arch = "x86_64", target_arch = "aarch64"), not(feature = "force-scalar")))]
+#[cfg(all(
+    any(target_arch = "x86_64", target_arch = "aarch64"),
+    not(feature = "force-scalar")
+))]
 #[cfg_attr(target_arch = "x86_64", target_feature(enable = "sse4.1"))]
 #[cfg_attr(target_arch = "aarch64", target_feature(enable = "neon"))]
 fn pixels<const F: u8, const BPP: usize>(row: &mut [u8], prev: &[u8]) {
@@ -467,7 +510,11 @@ mod tests {
         for &b in data {
             c ^= b as u32;
             for _ in 0..8 {
-                c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+                c = if c & 1 != 0 {
+                    0xEDB8_8320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
             }
         }
         !c
@@ -523,7 +570,9 @@ mod tests {
     fn unfilter_kernels_match_scalar() {
         let mut r = Rng(0xDEAD_BEEF_0000_0007);
         for bpp in 1..=8 {
-            for len in [bpp, 15, 16, 17, 24, 31, 33, 64, 300, 1023].map(|l: usize| l.div_ceil(bpp) * bpp) {
+            for len in
+                [bpp, 15, 16, 17, 24, 31, 33, 64, 300, 1023].map(|l: usize| l.div_ceil(bpp) * bpp)
+            {
                 for kind in [1u8, 2, 3, 4] {
                     for trial in 0..20 {
                         let (row, prev) = if trial == 0 {

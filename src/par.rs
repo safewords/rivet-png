@@ -34,8 +34,9 @@ pub(crate) fn map<T: Send>(tasks: usize, threads: usize, f: impl Fn(usize) -> T 
     };
     let mut results: Vec<Option<T>> = (0..tasks).map(|_| None).collect();
     std::thread::scope(|s| {
-        let handles: Vec<_> =
-            (1..workers).filter_map(|_| std::thread::Builder::new().spawn_scoped(s, run).ok()).collect();
+        let handles: Vec<_> = (1..workers)
+            .filter_map(|_| std::thread::Builder::new().spawn_scoped(s, run).ok())
+            .collect();
         for (t, r) in run() {
             results[t] = Some(r);
         }
@@ -50,5 +51,8 @@ pub(crate) fn map<T: Send>(tasks: usize, threads: usize, f: impl Fn(usize) -> T 
             }
         }
     });
-    results.into_iter().map(|r| r.expect("every task ran")).collect()
+    results
+        .into_iter()
+        .map(|r| r.expect("every task ran"))
+        .collect()
 }

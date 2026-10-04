@@ -37,8 +37,8 @@
 #![deny(unsafe_code)]
 #![warn(missing_docs)]
 
-pub mod deflate;
 mod decode;
+pub mod deflate;
 mod encode;
 mod error;
 mod filter;
@@ -52,7 +52,7 @@ pub use encode::{Encoder, encode};
 pub use error::{Error, Result};
 pub use filter::{Filter, FilterStrategy};
 pub use types::{
-    Animation, Background, BlendOp, Chromaticities, Cicp, ColorType, ContentLightLevel, DisposeOp, Frame,
-    FrameControl, IccProfile, Image, MasteringDisplay, Metadata, PhysicalDimensions, Text, TextKind, Time,
-    Transparency, UnknownChunk,
+    Animation, Background, BlendOp, Chromaticities, Cicp, ColorType, ContentLightLevel, DisposeOp,
+    Frame, FrameControl, IccProfile, Image, MasteringDisplay, Metadata, PhysicalDimensions, Text,
+    TextKind, Time, Transparency, UnknownChunk,
 };

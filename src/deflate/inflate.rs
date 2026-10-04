@@ -19,7 +19,12 @@ struct Bits<'a> {
 
 impl<'a> Bits<'a> {
     fn new(data: &'a [u8]) -> Self {
-        Bits { data, pos: 0, buf: 0, count: 0 }
+        Bits {
+            data,
+            pos: 0,
+            buf: 0,
+            count: 0,
+        }
     }
 
     #[inline]
@@ -168,7 +173,11 @@ impl Default for Inflater {
 impl Inflater {
     /// No output limit; Adler-32 checked.
     pub fn new() -> Self {
-        Inflater { limit: usize::MAX, check_adler: true, size_hint: 0 }
+        Inflater {
+            limit: usize::MAX,
+            check_adler: true,
+            size_hint: 0,
+        }
     }
 
     /// Fails with [`Error::Limit`] rather than produce more than `limit`
@@ -195,7 +204,11 @@ impl Inflater {
         let mut out = Vec::with_capacity(self.size_hint.min(self.limit).min(1 << 28));
         let mut br = Bits::new(input);
         let blocks = inflate_blocks(&mut br, &mut out, self.limit)?;
-        Ok(Inflated { data: out, consumed: br.bytes_used(), blocks })
+        Ok(Inflated {
+            data: out,
+            consumed: br.bytes_used(),
+            blocks,
+        })
     }
 
     /// Decompresses a zlib stream (RFC 1950) from the start of `input`.
@@ -229,7 +242,11 @@ impl Inflater {
                 return Err(Error::Checksum { expected, actual });
             }
         }
-        Ok(Inflated { data: out, consumed: at + 4, blocks })
+        Ok(Inflated {
+            data: out,
+            consumed: at + 4,
+            blocks,
+        })
     }
 }
 
@@ -327,26 +344,45 @@ fn dynamic_header(br: &mut Bits) -> Result<(Decoder, Decoder), Error> {
         i += repeat;
     }
     if lengths[256] == 0 {
-        return Err(Error::Invalid("the block's code has no end-of-block symbol"));
+        return Err(Error::Invalid(
+            "the block's code has no end-of-block symbol",
+        ));
     }
     let lit = Decoder::new(&lengths[..hlit])?;
     let dist = Decoder::new(&lengths[hlit..total])?;
     Ok((lit, dist))
 }
 
-fn codes(br: &mut Bits, out: &mut Vec<u8>, lit: &Decoder, dist: &Decoder, limit: usize) -> Result<(), Error> {
+fn codes(
+    br: &mut Bits,
+    out: &mut Vec<u8>,
+    lit: &Decoder,
+    dist: &Decoder,
+    limit: usize,
+) -> Result<(), Error> {
     // Work on a local vector (and a local bit reader): stores into the
     // output bytes could otherwise alias the vector's length behind `out`,
     // forcing it to be reloaded after every byte.
     let mut local = std::mem::take(out);
-    let mut bits = Bits { data: br.data, pos: br.pos, buf: br.buf, count: br.count };
+    let mut bits = Bits {
+        data: br.data,
+        pos: br.pos,
+        buf: br.buf,
+        count: br.count,
+    };
     let r = codes_local(&mut bits, &mut local, lit, dist, limit);
     *out = local;
     *br = bits;
     r
 }
 
-fn codes_local(br: &mut Bits, out: &mut Vec<u8>, lit: &Decoder, dist: &Decoder, limit: usize) -> Result<(), Error> {
+fn codes_local(
+    br: &mut Bits,
+    out: &mut Vec<u8>,
+    lit: &Decoder,
+    dist: &Decoder,
+    limit: usize,
+) -> Result<(), Error> {
     loop {
         // Away from the end of the input, one refill covers a whole
         // literal or length-distance pair (at most 15 + 5 + 15 + 13 bits),
@@ -392,7 +428,13 @@ fn codes_local(br: &mut Bits, out: &mut Vec<u8>, lit: &Decoder, dist: &Decoder, 
 
 /// One literal or length-distance pair, with every read checked (near the
 /// end of the input). Returns false at the end of the block.
-fn codes_one(br: &mut Bits, out: &mut Vec<u8>, lit: &Decoder, dist: &Decoder, limit: usize) -> Result<bool, Error> {
+fn codes_one(
+    br: &mut Bits,
+    out: &mut Vec<u8>,
+    lit: &Decoder,
+    dist: &Decoder,
+    limit: usize,
+) -> Result<bool, Error> {
     let sym = br.symbol(lit)? as usize;
     if sym < 256 {
         if out.len() >= limit {
@@ -422,7 +464,9 @@ fn codes_one(br: &mut Bits, out: &mut Vec<u8>, lit: &Decoder, dist: &Decoder, li
 #[inline(always)]
 fn copy_match(out: &mut Vec<u8>, d: usize, len: usize, limit: usize) -> Result<(), Error> {
     if d > out.len() {
-        return Err(Error::Invalid("a distance reaching back before the start of the data"));
+        return Err(Error::Invalid(
+            "a distance reaching back before the start of the data",
+        ));
     }
     if out.len() + len > limit {
         return Err(Error::Limit(limit));
