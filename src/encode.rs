@@ -173,10 +173,10 @@ impl Encoder {
         if self.interlaced {
             for p in 0..7 {
                 let (pass, prow) = gather(p, &image.data, row, image.width, image.height, bits);
-                filter_rows(&pass, prow, bpp, self.filter, low, &mut filtered);
+                filter_rows(&pass, prow, bpp, self.filter, low, self.compression.threads, &mut filtered);
             }
         } else {
-            filter_rows(&image.data, row, bpp, self.filter, low, &mut filtered);
+            filter_rows(&image.data, row, bpp, self.filter, low, self.compression.threads, &mut filtered);
         }
         deflate::zlib_compress_with(&filtered, &self.compression)
     }

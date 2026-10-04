@@ -510,8 +510,7 @@ impl Decoder {
                 scatter(p, &pass, prow, width, height, bits, &mut data, row);
             }
         } else {
-            let un = unfilter_rows(&raw, row, height as usize, bpp)?;
-            data.copy_from_slice(&un);
+            data = unfilter_rows(&raw, row, height as usize, bpp)?;
             // Zero the spare low bits of each row's last byte.
             let spare = row * 8 - width as usize * bits;
             if spare > 0 {

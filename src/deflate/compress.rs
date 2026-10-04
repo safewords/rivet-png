@@ -41,13 +41,22 @@ pub struct Options {
     /// default (16384). Smaller blocks adapt their codes to the data more
     /// often at the price of more headers.
     pub block_symbols: usize,
+    /// The most threads to compress with (0: as many as the machine has; 1:
+    /// only the calling thread). Input is matched in independent segments
+    /// of 256 KiB (each also searching the 32 KiB before it), so the output
+    /// is the same whatever this is.
+    pub threads: usize,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { level: 6, block_type: BlockType::Auto, block_symbols: 0 }
+        Options { level: 6, block_type: BlockType::Auto, block_symbols: 0, threads: 0 }
     }
 }
+
+/// The input is matched in segments of this many bytes, independently (so
+/// in parallel), each block ending at a segment boundary.
+const SEGMENT: usize = 1 << 18;
 
 /// Compresses `data` into a raw DEFLATE stream at `level` (0-9; above 9 is
 /// taken as 9).
@@ -101,58 +110,93 @@ pub fn deflate_with(data: &[u8], options: &Options) -> Vec<u8> {
         return w.finish();
     }
     let max_symbols = if options.block_symbols == 0 { 16384 } else { options.block_symbols };
-    let main = lz_blocks(data, Params::for_level(level), block_type, max_symbols, w);
-    if level >= 8 {
-        // Long hash chains find longer but farther matches, which can cost
-        // more than they save once the distances are Huffman coded; the
-        // slowest levels also try a short-chain parse and keep the smaller.
-        let alt = lz_blocks(
-            data,
-            Params::for_level(4),
-            block_type,
-            max_symbols,
-            BitWriter::with_capacity(main.len() + 64),
-        );
-        if alt.len() < main.len() {
-            return alt;
-        }
-    }
-    main
-}
-
-fn lz_blocks(data: &[u8], params: Params, block_type: BlockType, max_symbols: usize, mut w: BitWriter) -> Vec<u8> {
-    let mut matcher = Matcher::new(data, params);
-    let mut tokens = Vec::with_capacity(max_symbols);
-    let mut block_start = 0;
-    loop {
-        tokens.clear();
-        let end = matcher.parse(&mut tokens, max_symbols);
-        let last = end >= data.len();
-        let raw = &data[block_start..end];
-        match block_type {
-            BlockType::Fixed => write_huffman(&mut w, &tokens, &Plan::fixed(), last),
-            BlockType::Dynamic => write_huffman(&mut w, &tokens, &Plan::dynamic(&tokens), last),
-            _ => {
-                let fixed = Plan::fixed();
-                let dynamic = Plan::dynamic(&tokens);
-                let fc = fixed.cost(&tokens);
-                let dc = dynamic.cost(&tokens);
-                let sc = stored_cost(raw.len(), w.pending_bits());
-                if sc < fc && sc < dc {
-                    write_stored(&mut w, raw, last);
-                } else if fc <= dc {
-                    write_huffman(&mut w, &tokens, &fixed, last);
-                } else {
-                    write_huffman(&mut w, &tokens, &dynamic, last);
-                }
+    let segments = data.len().div_ceil(SEGMENT);
+    let coded = crate::par::map(segments, options.threads, |i| {
+        let (start, end) = (i * SEGMENT, ((i + 1) * SEGMENT).min(data.len()));
+        let last = end == data.len();
+        let main = lz_blocks(data, start, end, Params::for_level(level), block_type, max_symbols, last);
+        if level >= 8 {
+            // Long hash chains find longer but farther matches, which can
+            // cost more than they save once the distances are Huffman coded;
+            // the slowest levels also try a short-chain parse and keep the
+            // smaller.
+            let alt = lz_blocks(data, start, end, Params::for_level(4), block_type, max_symbols, last);
+            if estimate(&alt) < estimate(&main) {
+                return alt;
             }
         }
-        block_start = end;
-        if last {
-            break;
+        main
+    });
+    for block in coded.iter().flatten() {
+        let raw = &data[block.raw.clone()];
+        if block_type == BlockType::Auto && stored_cost(raw.len(), w.pending_bits()) < block.bits {
+            write_stored(&mut w, raw, block.last);
+        } else {
+            w.append(&block.coded);
         }
     }
     w.finish()
+}
+
+/// One block, Huffman coded on its own (its bits do not depend on where in
+/// the stream it lands, unlike a stored block's padding).
+struct CodedBlock {
+    /// The input it codes.
+    raw: std::ops::Range<usize>,
+    /// Whether it is the stream's final block.
+    last: bool,
+    /// Its size in bits as coded.
+    bits: u64,
+    coded: BitWriter,
+}
+
+/// A segment's size in bits, taking each block stored when that is smaller.
+fn estimate(blocks: &[CodedBlock]) -> u64 {
+    blocks.iter().map(|b| b.bits.min(stored_cost(b.raw.len(), 0))).sum()
+}
+
+/// Matches `data[start..end]` (with the 32 KiB before `start` as history)
+/// and codes each block with the fixed or its own dynamic code, whichever is
+/// smaller (or as forced).
+fn lz_blocks(
+    data: &[u8],
+    start: usize,
+    end: usize,
+    params: Params,
+    block_type: BlockType,
+    max_symbols: usize,
+    last_segment: bool,
+) -> Vec<CodedBlock> {
+    let mut matcher = Matcher::new(data, params, start, end);
+    let mut tokens = Vec::with_capacity(max_symbols);
+    let mut blocks = Vec::new();
+    let mut block_start = start;
+    loop {
+        tokens.clear();
+        let block_end = matcher.parse(&mut tokens, max_symbols);
+        let last = block_end >= end;
+        let fixed = Plan::fixed();
+        let plan = match block_type {
+            BlockType::Fixed => fixed,
+            BlockType::Dynamic => Plan::dynamic(&tokens),
+            _ => {
+                let dynamic = Plan::dynamic(&tokens);
+                if fixed.cost(&tokens) <= dynamic.cost(&tokens) { fixed } else { dynamic }
+            }
+        };
+        let mut coded = BitWriter::with_capacity(tokens.len() + 64);
+        write_huffman(&mut coded, &tokens, &plan, last && last_segment);
+        blocks.push(CodedBlock {
+            raw: block_start..block_end,
+            last: last && last_segment,
+            bits: coded.out.len() as u64 * 8 + coded.count as u64,
+            coded,
+        });
+        block_start = block_end;
+        if last {
+            return blocks;
+        }
+    }
 }
 
 /// An LZ77 symbol: a literal byte, or a match of `len` bytes `dist` back.
@@ -193,6 +237,25 @@ impl BitWriter {
 
     fn pending_bits(&self) -> u32 {
         self.count
+    }
+
+    /// Appends everything `other` holds, its pending bits included.
+    fn append(&mut self, other: &BitWriter) {
+        if self.count == 0 {
+            self.out.extend_from_slice(&other.out);
+        } else {
+            let (shift, back) = (self.count, 8 - self.count);
+            let mut carry = self.buf as u8;
+            self.out.reserve(other.out.len());
+            for &b in &other.out {
+                self.out.push(carry | (b << shift));
+                carry = b >> back;
+            }
+            self.buf = carry as u64;
+        }
+        if other.count > 0 {
+            self.put(other.buf as u32, other.count);
+        }
     }
 
     fn finish(mut self) -> Vec<u8> {
@@ -462,6 +525,8 @@ fn match_len(a: &[u8], b: &[u8]) -> usize {
 struct Matcher<'a> {
     data: &'a [u8],
     params: Params,
+    /// Where matching stops (matches do not reach past it).
+    end: usize,
     /// Most recent position + 1 with each hash (0 = none).
     head: Vec<u32>,
     /// For position p (mod WINDOW), the previous position + 1 with the same
@@ -476,14 +541,16 @@ struct Matcher<'a> {
 }
 
 impl<'a> Matcher<'a> {
-    fn new(data: &'a [u8], params: Params) -> Self {
+    /// Matches `data[start..end]`, with the window before `start` as history.
+    fn new(data: &'a [u8], params: Params, start: usize, end: usize) -> Self {
         Matcher {
             data,
             params,
+            end,
             head: vec![0; HASH_SIZE],
             prev: vec![0; WINDOW],
-            pos: 0,
-            inserted: 0,
+            pos: start,
+            inserted: start.saturating_sub(WINDOW),
             pending: None,
         }
     }
@@ -512,7 +579,7 @@ impl<'a> Matcher<'a> {
     /// in the chains, `p` itself not yet).
     fn find(&self, p: usize, chain: usize) -> (usize, usize) {
         let d = self.data;
-        let max = MAX_MATCH.min(d.len() - p);
+        let max = MAX_MATCH.min(self.end - p);
         if max < MIN_MATCH {
             return (0, 0);
         }
@@ -528,7 +595,16 @@ impl<'a> Matcher<'a> {
                 break;
             }
             last_cand = c;
-            if d[c + best.0.min(max - 1)] == d[p + best.0.min(max - 1)] {
+            // A candidate can only beat `best` if it matches through byte
+            // best.0: compare that byte, with the three before it.
+            let probe = best.0.min(max - 1);
+            let worth = if probe >= 3 {
+                let at = |i: usize| u32::from_le_bytes([d[i], d[i + 1], d[i + 2], d[i + 3]]);
+                at(c + probe - 3) == at(p + probe - 3)
+            } else {
+                d[c + probe] == d[p + probe]
+            };
+            if worth {
                 let l = match_len(&d[c..c + max], &d[p..p + max]);
                 if l > best.0 && (best.0 < MIN_MATCH || gain(l, p - c) > gain(best.0, best.1)) {
                     best = (l, p - c);
@@ -549,7 +625,7 @@ impl<'a> Matcher<'a> {
 
     /// Appends up to `max` tokens; returns the input position reached.
     fn parse(&mut self, tokens: &mut Vec<Token>, max: usize) -> usize {
-        let n = self.data.len();
+        let n = self.end;
         while self.pos < n && tokens.len() < max {
             let p = self.pos;
             let (len, dist) = match self.pending.take() {

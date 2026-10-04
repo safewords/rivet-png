@@ -70,96 +70,215 @@ fn paeth(a: u8, b: u8, c: u8) -> u8 {
 pub(crate) fn unfilter(filter: Filter, row: &mut [u8], prev: &[u8], bpp: usize) {
     match filter {
         Filter::None => {}
-        Filter::Sub => {
-            for i in bpp..row.len() {
-                row[i] = row[i].wrapping_add(row[i - bpp]);
-            }
-        }
         Filter::Up => {
             for (x, &b) in row.iter_mut().zip(prev) {
                 *x = x.wrapping_add(b);
             }
         }
-        Filter::Average => {
-            for i in 0..row.len() {
-                let a = if i >= bpp { row[i - bpp] } else { 0 };
-                row[i] = row[i].wrapping_add(((a as u16 + prev[i] as u16) / 2) as u8);
+        f => {
+            if !crate::simd::unfilter(f.code(), row, prev, bpp) {
+                unfilter_scalar_from(f.code(), row, prev, bpp, 0);
             }
         }
-        Filter::Paeth => {
-            for i in 0..row.len() {
-                let (a, c) = if i >= bpp { (row[i - bpp], prev[i - bpp]) } else { (0, 0) };
-                row[i] = row[i].wrapping_add(paeth(a, prev[i], c));
+    }
+}
+
+/// The portable reverse filter (type `kind`) from byte `start` on; the
+/// bytes before `start` are already reconstructed. The vector kernels
+/// finish rows with this.
+pub(crate) fn unfilter_scalar_from(kind: u8, row: &mut [u8], prev: &[u8], bpp: usize, start: usize) {
+    let n = row.len();
+    let head = bpp.min(n);
+    match kind {
+        1 => {
+            for i in start.max(bpp)..n {
+                row[i] = row[i].wrapping_add(row[i - bpp]);
             }
         }
+        2 => {
+            for i in start..n {
+                row[i] = row[i].wrapping_add(prev[i]);
+            }
+        }
+        3 => {
+            for i in start..head {
+                row[i] = row[i].wrapping_add(prev[i] / 2);
+            }
+            for i in start.max(head)..n {
+                row[i] = row[i].wrapping_add(((row[i - bpp] as u16 + prev[i] as u16) / 2) as u8);
+            }
+        }
+        4 => {
+            // With no pixel to the left, a and c are 0 and Paeth picks b.
+            for i in start..head {
+                row[i] = row[i].wrapping_add(prev[i]);
+            }
+            for i in start.max(head)..n {
+                row[i] = row[i].wrapping_add(paeth(row[i - bpp], prev[i], prev[i - bpp]));
+            }
+        }
+        _ => {}
     }
 }
 
 /// Applies `filter` to `row` (previous row `prev`), writing to `out`.
+/// Written as one loop per filter over whole slices, without branches in
+/// the bodies, so that the compiler vectorises them.
+#[inline(always)]
 pub(crate) fn apply(filter: Filter, row: &[u8], prev: &[u8], bpp: usize, out: &mut [u8]) {
-    for i in 0..row.len() {
-        let a = if i >= bpp { row[i - bpp] } else { 0 };
-        let b = prev[i];
-        let c = if i >= bpp { prev[i - bpp] } else { 0 };
-        let pred = match filter {
-            Filter::None => 0,
-            Filter::Sub => a,
-            Filter::Up => b,
-            Filter::Average => ((a as u16 + b as u16) / 2) as u8,
-            Filter::Paeth => paeth(a, b, c),
-        };
-        out[i] = row[i].wrapping_sub(pred);
+    let n = row.len();
+    let k = bpp.min(n);
+    let (prev, out) = (&prev[..n], &mut out[..n]);
+    match filter {
+        Filter::None => out.copy_from_slice(row),
+        Filter::Sub => {
+            out[..k].copy_from_slice(&row[..k]);
+            for ((o, &x), &a) in out[k..].iter_mut().zip(&row[k..]).zip(&row[..n - k]) {
+                *o = x.wrapping_sub(a);
+            }
+        }
+        Filter::Up => {
+            for ((o, &x), &b) in out.iter_mut().zip(row).zip(prev) {
+                *o = x.wrapping_sub(b);
+            }
+        }
+        Filter::Average => {
+            for i in 0..k {
+                out[i] = row[i].wrapping_sub(prev[i] / 2);
+            }
+            for (((o, &x), &a), &b) in out[k..].iter_mut().zip(&row[k..]).zip(&row[..n - k]).zip(&prev[k..]) {
+                *o = x.wrapping_sub(((a as u16 + b as u16) >> 1) as u8);
+            }
+        }
+        Filter::Paeth => {
+            for i in 0..k {
+                out[i] = row[i].wrapping_sub(prev[i]);
+            }
+            for ((((o, &x), &a), &b), &c) in
+                out[k..].iter_mut().zip(&row[k..]).zip(&row[..n - k]).zip(&prev[k..]).zip(&prev[..n - k])
+            {
+                *o = x.wrapping_sub(paeth_select(a, b, c));
+            }
+        }
     }
 }
 
-fn cost(bytes: &[u8]) -> u64 {
-    bytes.iter().map(|&b| (b as i8).unsigned_abs() as u64).sum()
+/// The Paeth predictor without branches (the same choice as [`paeth`]).
+#[inline(always)]
+fn paeth_select(a: u8, b: u8, c: u8) -> u8 {
+    let (a16, b16, c16) = (a as i16, b as i16, c as i16);
+    let pa = (b16 - c16).abs();
+    let pb = (a16 - c16).abs();
+    let pc = (a16 + b16 - 2 * c16).abs();
+    let bc = if pb <= pc { b } else { c };
+    if pa <= pb && pa <= pc { a } else { bc }
 }
 
+#[inline(always)]
+fn cost(bytes: &[u8]) -> u64 {
+    // Summed in 32-bit lanes, a piece at a time, so that it vectorises.
+    bytes.chunks(1 << 16).map(|p| p.iter().map(|&b| (b as i8).unsigned_abs() as u32).sum::<u32>() as u64).sum()
+}
+
+/// Filters one row into `best` (with `trial` as scratch) and returns the
+/// filter chosen.
+#[inline(always)]
+fn filter_row(
+    row: &[u8],
+    prev: &[u8],
+    bpp: usize,
+    strategy: FilterStrategy,
+    low_depth_or_indexed: bool,
+    trial: &mut Vec<u8>,
+    best: &mut Vec<u8>,
+) -> Filter {
+    match strategy {
+        FilterStrategy::Fixed(f) => {
+            apply(f, row, prev, bpp, best);
+            f
+        }
+        FilterStrategy::Adaptive if low_depth_or_indexed => {
+            best.copy_from_slice(row);
+            Filter::None
+        }
+        FilterStrategy::Adaptive | FilterStrategy::AdaptiveAlways => {
+            let mut chosen = Filter::None;
+            let mut chosen_cost = u64::MAX;
+            for f in Filter::ALL {
+                apply(f, row, prev, bpp, trial);
+                let c = cost(trial);
+                if c < chosen_cost {
+                    chosen_cost = c;
+                    chosen = f;
+                    std::mem::swap(trial, best);
+                }
+            }
+            chosen
+        }
+    }
+}
+
+/// Filters rows `range` of `rows` (each `row_len` bytes), appending each
+/// with its filter type byte to `out`.
+fn filter_range(
+    rows: &[u8],
+    row_len: usize,
+    bpp: usize,
+    strategy: FilterStrategy,
+    low_depth_or_indexed: bool,
+    range: std::ops::Range<usize>,
+    out: &mut Vec<u8>,
+) {
+    let body = |out: &mut Vec<u8>| {
+        let zero = vec![0u8; row_len];
+        let mut trial = vec![0u8; row_len];
+        let mut best = vec![0u8; row_len];
+        for y in range {
+            let row = &rows[y * row_len..(y + 1) * row_len];
+            let prev = if y == 0 { &zero[..] } else { &rows[(y - 1) * row_len..y * row_len] };
+            let choice = filter_row(row, prev, bpp, strategy, low_depth_or_indexed, &mut trial, &mut best);
+            out.push(choice.code());
+            out.extend_from_slice(&best);
+        }
+    };
+    crate::simd::with_wide_vectors(|| body(out))
+}
+
+/// Rows per task when filtering in parallel: enough to amortise a thread,
+/// few enough to share out a picture of a few megapixels.
+const PARALLEL_BYTES: usize = 1 << 18;
+
 /// Filters `rows` (each `row_len` bytes) into `out`, with a filter type byte
-/// before each row.
+/// before each row. Rows are filtered from the unfiltered rows above them,
+/// so they are independent: large images are shared among `threads`
+/// threads (0: as many as the machine has), with the same result.
 pub(crate) fn filter_rows(
     rows: &[u8],
     row_len: usize,
     bpp: usize,
     strategy: FilterStrategy,
     low_depth_or_indexed: bool,
+    threads: usize,
     out: &mut Vec<u8>,
 ) {
     if row_len == 0 {
         return;
     }
-    let zero = vec![0u8; row_len];
-    let mut trial = vec![0u8; row_len];
-    let mut best = vec![0u8; row_len];
-    for (y, row) in rows.chunks_exact(row_len).enumerate() {
-        let prev = if y == 0 { &zero[..] } else { &rows[(y - 1) * row_len..y * row_len] };
-        let choice = match strategy {
-            FilterStrategy::Fixed(f) => {
-                apply(f, row, prev, bpp, &mut best);
-                f
-            }
-            FilterStrategy::Adaptive if low_depth_or_indexed => {
-                best.copy_from_slice(row);
-                Filter::None
-            }
-            FilterStrategy::Adaptive | FilterStrategy::AdaptiveAlways => {
-                let mut chosen = Filter::None;
-                let mut chosen_cost = u64::MAX;
-                for f in Filter::ALL {
-                    apply(f, row, prev, bpp, &mut trial);
-                    let c = cost(&trial);
-                    if c < chosen_cost {
-                        chosen_cost = c;
-                        chosen = f;
-                        std::mem::swap(&mut trial, &mut best);
-                    }
-                }
-                chosen
-            }
-        };
-        out.push(choice.code());
-        out.extend_from_slice(&best);
+    let height = rows.len() / row_len;
+    let per_task = (PARALLEL_BYTES / row_len).max(1);
+    let tasks = height.div_ceil(per_task);
+    if tasks <= 1 {
+        filter_range(rows, row_len, bpp, strategy, low_depth_or_indexed, 0..height, out);
+        return;
+    }
+    let parts = crate::par::map(tasks, threads, |t| {
+        let range = t * per_task..((t + 1) * per_task).min(height);
+        let mut part = Vec::with_capacity(range.len() * (row_len + 1));
+        filter_range(rows, row_len, bpp, strategy, low_depth_or_indexed, range, &mut part);
+        part
+    });
+    for p in parts {
+        out.extend_from_slice(&p);
     }
 }
 
@@ -181,5 +300,38 @@ mod tests {
         assert_eq!(paeth(10, 20, 15), 15);
         assert_eq!(paeth(10, 20, 10), 20);
         assert_eq!(paeth(10, 20, 20), 10);
+    }
+
+    #[test]
+    fn apply_matches_the_definition() {
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut byte = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed as u8
+        };
+        for bpp in 1..=8 {
+            for len in [1usize, 3, 7, 16, 33, 100, 257] {
+                let row: Vec<u8> = (0..len).map(|_| byte()).collect();
+                let prev: Vec<u8> = (0..len).map(|_| byte()).collect();
+                for f in Filter::ALL {
+                    let mut out = vec![0; len];
+                    crate::simd::with_wide_vectors(|| apply(f, &row, &prev, bpp, &mut out));
+                    for i in 0..len {
+                        let a = if i >= bpp { row[i - bpp] } else { 0 };
+                        let c = if i >= bpp { prev[i - bpp] } else { 0 };
+                        let pred = match f {
+                            Filter::None => 0,
+                            Filter::Sub => a,
+                            Filter::Up => prev[i],
+                            Filter::Average => ((a as u16 + prev[i] as u16) / 2) as u8,
+                            Filter::Paeth => paeth(a, prev[i], c),
+                        };
+                        assert_eq!(out[i], row[i].wrapping_sub(pred), "{f:?} bpp {bpp} len {len} at {i}");
+                    }
+                }
+            }
+        }
     }
 }

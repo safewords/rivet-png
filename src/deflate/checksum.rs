@@ -2,8 +2,8 @@
 //! V.42, the reflected polynomial 0xEDB88320) and Adler-32 (the zlib trailer,
 //! RFC 1950 §8.2).
 
-const fn crc_table() -> [[u32; 256]; 4] {
-    let mut t = [[0u32; 256]; 4];
+const fn crc_table() -> [[u32; 256]; 8] {
+    let mut t = [[0u32; 256]; 8];
     let mut n = 0;
     while n < 256 {
         let mut c = n as u32;
@@ -15,11 +15,11 @@ const fn crc_table() -> [[u32; 256]; 4] {
         t[0][n] = c;
         n += 1;
     }
-    // Slicing by four: t[j][n] is the CRC of byte n followed by j zero bytes.
+    // Slicing by eight: t[j][n] is the CRC of byte n followed by j zero bytes.
     let mut n = 0;
     while n < 256 {
         let mut j = 1;
-        while j < 4 {
+        while j < 8 {
             let prev = t[j - 1][n];
             t[j][n] = t[0][(prev & 0xFF) as usize] ^ (prev >> 8);
             j += 1;
@@ -29,7 +29,7 @@ const fn crc_table() -> [[u32; 256]; 4] {
     t
 }
 
-static CRC: [[u32; 256]; 4] = crc_table();
+static CRC: [[u32; 256]; 8] = crc_table();
 
 /// A running CRC-32. Start from [`Crc32::new`], feed bytes with
 /// [`update`](Crc32::update), read the value with [`finish`](Crc32::finish).
@@ -50,25 +50,33 @@ impl Crc32 {
 
     /// Feeds `data`.
     pub fn update(&mut self, data: &[u8]) {
-        let mut c = self.0;
-        let (quads, rest) = data.as_chunks::<4>();
-        for q in quads {
-            c ^= u32::from_le_bytes(*q);
-            c = CRC[3][(c & 0xFF) as usize]
-                ^ CRC[2][((c >> 8) & 0xFF) as usize]
-                ^ CRC[1][((c >> 16) & 0xFF) as usize]
-                ^ CRC[0][(c >> 24) as usize];
-        }
-        for &b in rest {
-            c = CRC[0][((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8);
-        }
-        self.0 = c;
+        self.0 = crate::simd::crc32_update(self.0, data, crc_table_update);
     }
 
     /// The CRC of everything fed so far.
     pub fn finish(&self) -> u32 {
         self.0 ^ 0xFFFF_FFFF
     }
+}
+
+/// The table-driven register update (slicing by four).
+fn crc_table_update(mut c: u32, data: &[u8]) -> u32 {
+    let (octets, rest) = data.as_chunks::<8>();
+    for o in octets {
+        let lo = c ^ u32::from_le_bytes([o[0], o[1], o[2], o[3]]);
+        c = CRC[7][(lo & 0xFF) as usize]
+            ^ CRC[6][((lo >> 8) & 0xFF) as usize]
+            ^ CRC[5][((lo >> 16) & 0xFF) as usize]
+            ^ CRC[4][(lo >> 24) as usize]
+            ^ CRC[3][o[4] as usize]
+            ^ CRC[2][o[5] as usize]
+            ^ CRC[1][o[6] as usize]
+            ^ CRC[0][o[7] as usize];
+    }
+    for &b in rest {
+        c = CRC[0][((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8);
+    }
+    c
 }
 
 /// The CRC-32 of `data`.
@@ -85,6 +93,9 @@ const ADLER_RUN: usize = 5552;
 
 /// The Adler-32 of `data`, continuing from `adler` (1 for a fresh sum).
 pub fn adler32_update(adler: u32, data: &[u8]) -> u32 {
+    if let Some(v) = crate::simd::adler32_update(adler, data) {
+        return v;
+    }
     let mut a = adler & 0xFFFF;
     let mut b = adler >> 16;
     for run in data.chunks(ADLER_RUN) {

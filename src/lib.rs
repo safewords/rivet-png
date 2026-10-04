@@ -33,7 +33,8 @@
 //! Pixels are kept in PNG's own layout ([`Image`]); [`Image::to_rgba8`] and
 //! [`Image::to_rgba16`] convert.
 
-#![forbid(unsafe_code)]
+// Unsafe code is confined to the vector kernels in `simd`.
+#![deny(unsafe_code)]
 #![warn(missing_docs)]
 
 pub mod deflate;
@@ -42,6 +43,8 @@ mod encode;
 mod error;
 mod filter;
 mod interlace;
+mod par;
+mod simd;
 mod types;
 
 pub use decode::{ComposedFrame, Decoder, Header, Png, SIGNATURE, decode, read_header};

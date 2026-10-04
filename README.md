@@ -20,7 +20,9 @@ them).
 
 Published as `rivet-png`; **imported as `rpng`** (`use rpng::…`), since
 `png` is already the name of a crate in rivet's dependency graph. One
-dependency (`thiserror`), no features, no build script, no `unsafe`.
+dependency (`thiserror`), no build script; `unsafe` only in the vector
+kernels ([`src/simd.rs`](src/simd.rs)), which the `force-scalar` feature
+compiles out.
 
 ```toml
 [dependencies]
@@ -182,9 +184,16 @@ not, with fdAT split into 7-byte chunks; indexed frames; a hidden static
 image; frames that do not fit are refused. The decoder's chunk rules are
 checked on hand-built files.
 
-Speed, for scale (release build, one core, a 2048x2048 noisy RGBA image,
-16 MiB of pixels): decode about 45 ms; encode 0.23 s at level 1, 1.3 s at 6,
-8.5 s at 9.
+Speed, for scale (release build, Ryzen 9 9950X, three 1080x720 RGB frames
+of camera video, 2.3 megapixels in all): decode about 95 megapixels a
+second; encode about 100 at level 1, 39 at level 6 and 12 at level 9. The
+encoder filters rows and matches its input in 256 KiB segments (each also
+searching the 32 KiB before it) on as many threads as the machine has
+(`deflate::Options::threads`); the output is the same on any number of
+threads. CRC-32 is computed by carry-less multiplication (PCLMULQDQ,
+PMULL), Adler-32 32 or 16 bytes at a time (AVX2, NEON), and the reverse
+filters a pixel at a time in vector lanes, all chosen at run time and
+checked against the portable code they replace.
 
 ## Where the specifications leave room
 

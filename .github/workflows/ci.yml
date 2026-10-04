@@ -29,6 +29,10 @@ jobs:
       # DEFLATE edge cases and the encoder round trips.
       - name: Tests
         run: cargo test --release
+      # The same tests with the vector kernels compiled out.
+      - name: Tests, portable code only (force-scalar)
+        if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm'
+        run: cargo test --release --features force-scalar
       - name: Tests with overflow checks (debug)
         run: cargo test
 

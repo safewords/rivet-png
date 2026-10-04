@@ -76,7 +76,7 @@ fn round_trips_every_level_and_block_type() {
         for level in 0..=9u8 {
             for bt in [BlockType::Auto, BlockType::Stored, BlockType::Fixed, BlockType::Dynamic] {
                 for block_symbols in [0, 1000] {
-                    let opts = Options { level, block_type: bt, block_symbols };
+                    let opts = Options { level, block_type: bt, block_symbols, threads: 0 };
                     let raw = deflate::deflate_with(&data, &opts);
                     let r = Inflater::new().inflate(&raw).unwrap_or_else(|e| panic!("{name} {opts:?}: {e}"));
                     assert!(r.data == data, "{name} {opts:?}: raw round trip differs");
@@ -116,7 +116,7 @@ fn auto_picks_each_block_type_where_it_wins() {
     let mut mixed = text(20_000);
     mixed.extend_from_slice(&r.bytes(20_000));
     mixed.extend_from_slice(b"ab");
-    let opts = Options { level: 6, block_type: BlockType::Auto, block_symbols: 4000 };
+    let opts = Options { level: 6, block_type: BlockType::Auto, block_symbols: 4000, threads: 0 };
     let s = deflate::deflate_with(&mixed, &opts);
     let got = Inflater::new().inflate(&s).unwrap();
     assert_eq!(got.data, mixed);
@@ -355,4 +355,43 @@ fn output_limit_is_enforced() {
     let z = deflate::deflate(&vec![7u8; 100_000], 6);
     assert_eq!(Inflater::new().limit(99_999).inflate(&z).map(|r| r.data.len()), Err(deflate::Error::Limit(99_999)));
     assert_eq!(Inflater::new().limit(100_000).inflate(&z).unwrap().data.len(), 100_000);
+}
+
+#[test]
+fn segmented_compression_is_independent_of_threads() {
+    // Inputs spanning several 256 KiB segments: text, structured binary,
+    // incompressible bytes (stored blocks landing at arbitrary bit
+    // offsets), and a mix that switches between them mid-segment.
+    let mut mixed = text(300_000);
+    mixed.extend(Rng(11).bytes(200_000));
+    mixed.extend(binary(400_000));
+    mixed.extend(vec![0u8; 70_000]);
+    let inputs = [text(1 << 20), binary(700_001), Rng(5).bytes(600_000), mixed];
+    for data in &inputs {
+        // Unoptimised (debug) test builds try fewer levels.
+        let levels: &[u8] = if cfg!(debug_assertions) { &[1, 9] } else { &[1, 4, 6, 9] };
+        for &level in levels {
+            for block_type in [BlockType::Auto, BlockType::Fixed, BlockType::Dynamic] {
+                let at = |threads| deflate::deflate_with(data, &Options { level, block_type, threads, ..Default::default() });
+                let one = at(1);
+                assert_eq!(deflate::inflate(&one).unwrap(), *data, "level {level} {block_type:?}");
+                assert_eq!(at(0), one, "level {level} {block_type:?}: threads 0");
+                assert_eq!(at(3), one, "level {level} {block_type:?}: threads 3");
+            }
+        }
+        let z = deflate::zlib_compress(data, 6);
+        assert_eq!(deflate::zlib_decompress(&z).unwrap(), *data);
+    }
+}
+
+#[test]
+fn matches_reach_back_across_segment_boundaries() {
+    // A 100 KiB block repeated: every copy after the first is one long
+    // match, also where it straddles a segment boundary, so the stream stays
+    // tiny.
+    let unit = Rng(99).bytes(20_000);
+    let data: Vec<u8> = unit.iter().copied().cycle().take(1_200_000).collect();
+    let z = deflate::deflate(&data, 6);
+    assert!(z.len() < 30_000, "{} bytes", z.len());
+    assert_eq!(deflate::inflate(&z).unwrap(), data);
 }

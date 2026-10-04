@@ -22,3 +22,6 @@ thiserror = "2"
 
 [features]
 default = []
+# Compile out the vector kernels (SIMD) and use only the portable code; CI
+# tests both.
+force-scalar = []
