@@ -195,6 +195,19 @@ PMULL), Adler-32 32 or 16 bytes at a time (AVX2, NEON), and the reverse
 filters a pixel at a time in vector lanes, all chosen at run time and
 checked against the portable code they replace.
 
+### NEON on ARM hardware
+
+CI runs on x86-64 Linux only, so the NEON (aarch64) code paths are not tested
+there. They are verified by hand on ARM hardware (an aarch64 Linux machine,
+or Apple silicon) after a change to them and before a release:
+
+```sh
+cargo test --release
+cargo test --release --features force-scalar
+```
+
+The second run compiles the NEON paths out; both must pass unchanged.
+
 ## Where the specifications leave room
 
 - **Excess image data** (the zlib stream inflates to more than the image
